@@ -1,0 +1,10 @@
+config.js
+data/
+*.db
+*.sqlite
+*.sqlite3
+
+sports_api_pro/.env
+node_modules/
+__pycache__/
+*.pyc

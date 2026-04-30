@@ -1,0 +1,732 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Bot de Pronosticos Deportivos</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <section class="hero">
+        <div>
+          <p class="eyebrow">Futbol · MLB · NBA</p>
+          <h1>Bot de Pronosticos Deportivos</h1>
+          <p class="lede">
+            Analiza partidos, calcula probabilidades y entrega tips con nivel de confianza usando datos gratuitos y un modelo simple ajustable.
+          </p>
+        </div>
+        <div class="hero-panel" aria-label="Resumen del modelo">
+          <span class="status-dot"></span>
+          <strong>Motor activo</strong>
+          <p>Forma reciente, localia, ataque, defensa y tendencia de marcador.</p>
+        </div>
+      </section>
+
+      <section class="controls" aria-label="Controles de pronostico">
+        <label>
+          Deporte
+          <select id="sportSelect">
+            <option value="soccer">Futbol</option>
+            <option value="mlb">MLB</option>
+            <option value="nba">NBA</option>
+            <option value="nfl">NFL</option>
+          </select>
+        </label>
+
+        <label>
+          Liga
+          <select id="leagueSelect"></select>
+        </label>
+
+        <label>
+          API gratuita
+          <select id="apiSelect">
+            <option value="sportsapipro">Sports API Pro</option>
+            <option value="auto">Auto</option>
+            <option value="backend">Backend del bot</option>
+            <option value="balldontlie">balldontlie NBA</option>
+            <option value="therundown">TheRundown</option>
+            <option value="oddsapi">The Odds API</option>
+            <option value="thesportsdb">TheSportsDB</option>
+            <option value="mlb">MLB Stats API</option>
+            <option value="demo">Demo local</option>
+          </select>
+        </label>
+
+        <label>
+          Llave API opcional
+          <input id="apiKeyInput" type="password" placeholder="TheSportsDB: 123 o tu llave" />
+        </label>
+
+        <button id="loadBtn" type="button">
+          <span aria-hidden="true">↻</span>
+          Generar tips
+        </button>
+      </section>
+
+      <section class="model-bar" aria-label="Ajustes del modelo">
+        <label>
+          Riesgo
+          <input id="riskSlider" type="range" min="1" max="10" value="5" />
+        </label>
+        <label>
+          Min. confianza
+          <input id="confidenceSlider" type="range" min="45" max="75" value="52" />
+        </label>
+        <label class="toggle">
+          <input id="valueOnlyToggle" type="checkbox" />
+          Solo picks fuertes
+        </label>
+      </section>
+
+      <section class="model-bar" aria-label="Gestion de banca">
+        <label>
+          Banca inicial
+          <input id="bankrollInput" type="number" min="1" step="1" value="100" />
+        </label>
+        <label>
+          Perfil stake
+          <select id="stakeProfileSelect">
+            <option value="conservative">Conservador</option>
+            <option value="balanced" selected>Balanceado</option>
+            <option value="aggressive">Agresivo</option>
+          </select>
+        </label>
+        <label>
+          Modo apuesta
+          <select id="betModeSelect">
+            <option value="auto" selected>Auto</option>
+            <option value="conservative">Conservador</option>
+            <option value="normal">Normal</option>
+            <option value="aggressive">Agresivo</option>
+            <option value="value">Solo valor</option>
+          </select>
+        </label>
+        <label>
+          Stake por defecto
+          <input id="stakeInput" type="number" min="0.1" step="0.1" value="1" />
+        </label>
+        <label class="toggle">
+          <input id="autoGradeToggle" type="checkbox" checked />
+          Auto evaluar finales
+        </label>
+      </section>
+
+      <section class="summary-grid" aria-label="Resumen">
+        <article>
+          <span id="gamesCount">0</span>
+          <p>Partidos analizados</p>
+        </article>
+        <article>
+          <span id="tipsCount">0</span>
+          <p>Tips generados</p>
+        </article>
+        <article>
+          <span id="avgConfidence">0%</span>
+          <p>Confianza promedio</p>
+        </article>
+        <article>
+          <span id="oddsAlertsCount">0</span>
+          <p>Alertas de cuota</p>
+        </article>
+      </section>
+
+      <section class="content-grid">
+        <div class="board" aria-label="Abrir bot">
+          <div class="section-head">
+            <div>
+              <p class="eyebrow">Acceso</p>
+              <h2>Abrir bot</h2>
+            </div>
+            <button id="copyOpenCommandBtn" class="ghost-btn" type="button">Copiar comando</button>
+          </div>
+          <div id="openBotHelp" class="alerts-list"></div>
+        </div>
+
+        <div class="board" aria-label="Salud del feed">
+          <div class="section-head">
+            <div>
+              <p class="eyebrow">Feed</p>
+              <h2>Salud de conexiones</h2>
+            </div>
+            <label class="toggle inline-toggle">
+              <input id="telegramAutoTopToggle" type="checkbox" checked />
+              Auto top Telegram
+            </label>
+          </div>
+          <div class="history-actions">
+            <button id="runCollectBtn" class="ghost-btn" type="button">Correr todo</button>
+            <button id="runDigestBtn" class="ghost-btn" type="button">Correr digest</button>
+            <button id="runGradeBtn" class="ghost-btn" type="button">Correr grade</button>
+          </div>
+          <div class="section-head compact-head">
+            <span id="feedHealthBadge" class="badge">Esperando</span>
+          </div>
+          <div id="feedHealthList" class="alerts-list"></div>
+        </div>
+      </section>
+
+      <section class="board" aria-label="Calendario diario">
+        <div class="section-head">
+          <div>
+            <p class="eyebrow">Calendario</p>
+            <h2>Picks por fecha</h2>
+          </div>
+          <div class="history-actions">
+            <input id="calendarDateInput" type="date" />
+            <button id="calendarTodayBtn" class="ghost-btn" type="button">Hoy</button>
+          </div>
+        </div>
+        <div id="calendarSummary" class="alert-meta"></div>
+        <div id="calendarPicksList" class="calendar-picks-list"></div>
+      </section>
+
+      <section class="board" aria-label="Tops del dia">
+        <div class="section-head">
+          <div>
+            <p class="eyebrow">Tops</p>
+            <h2>Picks del dia</h2>
+          </div>
+          <span class="badge">Ranking automatico</span>
+        </div>
+        <div class="top-tabs">
+          <button class="ghost-btn top-tab active" type="button" data-top-filter="all">Todos</button>
+          <button class="ghost-btn top-tab" type="button" data-top-filter="soccer">Futbol</button>
+          <button class="ghost-btn top-tab" type="button" data-top-filter="mlb">MLB</button>
+          <button class="ghost-btn top-tab" type="button" data-top-filter="nba">NBA</button>
+          <button class="ghost-btn top-tab" type="button" data-top-filter="nfl">NFL</button>
+        </div>
+        <div id="topPicksList" class="top-picks-list"></div>
+      </section>
+
+      <section class="board" aria-label="Top picks reales del dia">
+        <div class="section-head">
+          <div>
+            <p class="eyebrow">Top Real</p>
+            <h2>Consenso final del dia</h2>
+          </div>
+          <span class="badge">Confianza ajustada</span>
+        </div>
+        <div id="realTopPicksList" class="top-picks-list"></div>
+      </section>
+
+      <section class="board" aria-label="Plan de apuesta">
+        <div class="section-head">
+          <div>
+            <p class="eyebrow">Plan</p>
+            <h2>Como apostar y cuanto apostar</h2>
+          </div>
+          <div class="history-actions">
+            <button id="copyBettingPlanBtn" class="ghost-btn" type="button">Copiar plan</button>
+            <button id="sendTelegramPlanBtn" class="ghost-btn" type="button">Enviar plan</button>
+            <span id="bettingPlanBadge" class="badge">Esperando picks</span>
+          </div>
+        </div>
+        <div id="bettingPlanPanel" class="alerts-list"></div>
+      </section>
+
+      <section class="board" aria-label="Historial del modo auto">
+        <div class="section-head">
+          <div>
+            <p class="eyebrow">Modo</p>
+            <h2>Historial del modo auto</h2>
+          </div>
+        </div>
+        <div id="betModeHistoryPanel" class="alerts-list"></div>
+      </section>
+
+      <section class="board" aria-label="Auditoria del bot">
+        <div class="section-head">
+          <div>
+            <p class="eyebrow">Auditoria</p>
+            <h2>Backtesting y paper trading</h2>
+          </div>
+          <div class="history-actions">
+            <button id="runPaperNowBtn" class="ghost-btn" type="button">Paper trade ahora</button>
+            <button id="clearPaperBtn" class="ghost-btn" type="button">Limpiar paper</button>
+          </div>
+        </div>
+
+        <div class="history-actions">
+          <input id="backtestFromDate" type="date" />
+          <input id="backtestToDate" type="date" />
+          <select id="backtestSourceFilter">
+            <option value="all">Todo</option>
+            <option value="history">Historial real</option>
+            <option value="paper">Paper trading</option>
+          </select>
+        </div>
+
+        <div class="history-stats" aria-label="Metricas de paper trading">
+          <article>
+            <span id="paperCount">0</span>
+            <p>Paper trades</p>
+          </article>
+          <article>
+            <span id="paperPending">0</span>
+            <p>Pendientes</p>
+          </article>
+          <article>
+            <span id="paperWinRate">0%</span>
+            <p>Acierto paper</p>
+          </article>
+          <article>
+            <span id="paperRoi">0%</span>
+            <p>ROI paper</p>
+          </article>
+          <article>
+            <span id="paperProfit">0.00u</span>
+            <p>Profit paper</p>
+          </article>
+        </div>
+
+        <div class="history-breakdowns">
+          <div class="mini-board">
+            <div class="section-head">
+              <div>
+                <p class="eyebrow">Paper</p>
+                <h2>Por modo</h2>
+              </div>
+            </div>
+            <div id="paperModeBreakdown" class="breakdown-list"></div>
+          </div>
+
+          <div class="mini-board">
+            <div class="section-head">
+              <div>
+                <p class="eyebrow">Paper</p>
+                <h2>Por deporte</h2>
+              </div>
+            </div>
+            <div id="paperSportBreakdown" class="breakdown-list"></div>
+          </div>
+        </div>
+
+        <div class="history-breakdowns">
+          <div class="mini-board">
+            <div class="section-head">
+              <div>
+                <p class="eyebrow">Paper</p>
+                <h2>Por mercado</h2>
+              </div>
+            </div>
+            <div id="paperMarketBreakdown" class="breakdown-list"></div>
+          </div>
+
+          <div class="mini-board">
+            <div class="section-head">
+              <div>
+                <p class="eyebrow">Backtest</p>
+                <h2>Resumen</h2>
+              </div>
+            </div>
+            <div id="backtestSummary" class="alerts-list"></div>
+          </div>
+        </div>
+
+        <div class="history-breakdowns">
+          <div class="mini-board">
+            <div class="section-head">
+              <div>
+                <p class="eyebrow">Modo</p>
+                <h2>ROI por modo</h2>
+              </div>
+            </div>
+            <div id="auditModeRoiBreakdown" class="breakdown-list"></div>
+          </div>
+
+          <div class="mini-board">
+            <div class="section-head">
+              <div>
+                <p class="eyebrow">Ranking</p>
+                <h2>Mejor y peor</h2>
+              </div>
+            </div>
+            <div id="auditRankingPanel" class="alerts-list"></div>
+          </div>
+        </div>
+      </section>
+
+      <section class="board" aria-label="Resumen para Telegram">
+        <div class="section-head">
+          <div>
+            <p class="eyebrow">Telegram</p>
+            <h2>Preview listo para mandar</h2>
+          </div>
+          <div class="history-actions">
+            <button id="sendTelegramDigestBtn" class="ghost-btn" type="button">Enviar digest</button>
+          </div>
+        </div>
+        <div id="telegramPreview" class="alerts-list"></div>
+      </section>
+
+      <section class="board" aria-label="Snapshot de estadisticas">
+        <div class="section-head">
+          <div>
+            <p class="eyebrow">Snapshot</p>
+            <h2>Estadistica guardada</h2>
+          </div>
+        </div>
+        <div id="statsSnapshotPanel" class="alerts-list"></div>
+      </section>
+
+      <section class="board" aria-label="Historial de envios telegram">
+        <div class="section-head">
+          <div>
+            <p class="eyebrow">Telegram</p>
+            <h2>Envios realizados</h2>
+          </div>
+        </div>
+        <div id="telegramSentHistory" class="alerts-list"></div>
+      </section>
+
+      <section class="board" aria-label="Alertas de cuotas">
+        <div class="section-head">
+          <div>
+            <p class="eyebrow">Alertas</p>
+            <h2>Movimientos de cuota</h2>
+          </div>
+          <div class="history-actions">
+            <button id="enableNotificationsBtn" class="ghost-btn" type="button">Activar notificaciones</button>
+            <span id="snapshotBadge" class="badge">Sin snapshot</span>
+          </div>
+        </div>
+        <div id="oddsAlertsList" class="alerts-list"></div>
+      </section>
+
+      <section class="board" aria-label="Validacion cruzada">
+        <div class="section-head">
+          <div>
+            <p class="eyebrow">Validacion</p>
+            <h2>Consenso entre fuentes</h2>
+          </div>
+          <span id="validationBadge" class="badge">Sin validar</span>
+        </div>
+        <div id="validationList" class="alerts-list"></div>
+      </section>
+
+      <section class="content-grid">
+        <div class="board">
+          <div class="section-head">
+            <div>
+              <p class="eyebrow">Books</p>
+              <h2>Comparador de cuotas</h2>
+            </div>
+          </div>
+          <div id="booksCompareList" class="alerts-list"></div>
+        </div>
+
+        <div class="board">
+          <div class="section-head">
+            <div>
+              <p class="eyebrow">Line Movement</p>
+              <h2>Apertura vs actual</h2>
+            </div>
+          </div>
+          <div id="lineMovementList" class="alerts-list"></div>
+        </div>
+      </section>
+
+      <section class="board" aria-label="Ticket builder">
+        <div class="section-head">
+          <div>
+            <p class="eyebrow">Ticket</p>
+            <h2>Builder</h2>
+          </div>
+          <div class="history-actions">
+            <button id="clearTicketBtn" class="ghost-btn" type="button">Limpiar ticket</button>
+            <button id="copyTicketBtn" class="ghost-btn" type="button">Copiar ticket</button>
+            <button id="copySlipBtn" class="ghost-btn" type="button">Copiar slip</button>
+            <button id="sendTelegramSlipBtn" class="ghost-btn" type="button">Enviar Telegram</button>
+          </div>
+        </div>
+        <div id="ticketSummary" class="alert-meta"></div>
+        <div id="ticketList" class="alerts-list"></div>
+      </section>
+
+      <section class="board" aria-label="Consenso final">
+        <div class="section-head">
+          <div>
+            <p class="eyebrow">Consenso</p>
+            <h2>Confianza ajustada</h2>
+          </div>
+          <div class="history-actions">
+            <button id="sendTelegramTopBtn" class="ghost-btn" type="button">Mandar tops</button>
+          </div>
+        </div>
+        <div id="consensusList" class="alerts-list"></div>
+      </section>
+
+      <section class="board" aria-label="Senales externas">
+        <div class="section-head">
+          <div>
+            <p class="eyebrow">Referencia</p>
+            <h2>Senales externas</h2>
+          </div>
+          <span id="externalBadge" class="badge">Base</span>
+        </div>
+        <div id="externalSignalsList" class="alerts-list"></div>
+      </section>
+
+      <section class="board parlays-board" aria-label="Parlays recomendados">
+        <div class="section-head">
+          <div>
+            <p class="eyebrow">Parlays</p>
+            <h2>Seguro, sueño y bomba</h2>
+          </div>
+          <span class="badge">No garantizados</span>
+        </div>
+        <div id="parlaysList" class="parlays-list"></div>
+      </section>
+
+      <section class="content-grid">
+        <div class="board">
+          <div class="section-head">
+            <div>
+              <p class="eyebrow">Pronosticos</p>
+              <h2>Picks recomendados</h2>
+            </div>
+            <span id="sourceBadge" class="badge">Listo</span>
+          </div>
+          <div id="tipsList" class="tips-list"></div>
+        </div>
+
+        <aside class="board">
+          <div class="section-head">
+            <div>
+              <p class="eyebrow">Bitacora</p>
+              <h2>Estado</h2>
+            </div>
+          </div>
+          <div id="logPanel" class="log-panel"></div>
+          <div class="note">
+            <strong>Nota responsable</strong>
+            <p>El bot estima probabilidades. No garantiza resultados ni ganancias.</p>
+          </div>
+        </aside>
+      </section>
+
+      <section class="board history-board" aria-label="Historial del bot">
+        <div class="section-head">
+          <div>
+            <p class="eyebrow">Historial</p>
+            <h2>Resultados y ROI</h2>
+          </div>
+          <div class="history-actions">
+            <button id="exportHistoryBtn" class="ghost-btn" type="button">Exportar CSV</button>
+            <button id="clearHistoryBtn" class="ghost-btn" type="button">Limpiar historial</button>
+          </div>
+        </div>
+
+        <div class="history-stats" aria-label="Metricas del historial">
+          <article>
+            <span id="historyCount">0</span>
+            <p>Guardados</p>
+          </article>
+          <article>
+            <span id="historyWinRate">0%</span>
+            <p>Acierto real</p>
+          </article>
+          <article>
+            <span id="historyRoi">0%</span>
+            <p>ROI</p>
+          </article>
+          <article>
+            <span id="historyProfit">0.00u</span>
+            <p>Ganancia</p>
+          </article>
+          <article>
+            <span id="historyBankroll">100.00u</span>
+            <p>Banca actual</p>
+          </article>
+        </div>
+
+        <div class="history-filters">
+          <label>
+            Desde
+            <input id="historyFromDate" type="date" />
+          </label>
+          <label>
+            Hasta
+            <input id="historyToDate" type="date" />
+          </label>
+          <label>
+            Deporte
+            <select id="historySportFilter">
+              <option value="">Todos</option>
+            </select>
+          </label>
+          <label>
+            Mercado
+            <select id="historyMarketFilter">
+              <option value="">Todos</option>
+            </select>
+          </label>
+          <label>
+            Liga
+            <select id="historyLeagueFilter">
+              <option value="">Todas</option>
+            </select>
+          </label>
+        </div>
+
+        <div class="history-table-wrap">
+          <table class="history-table">
+            <thead>
+              <tr>
+                <th>Fecha</th>
+                <th>Tipo</th>
+                <th>Pick</th>
+                <th>Cuota</th>
+                <th>Stake</th>
+                <th>CLV</th>
+                <th>Resultado</th>
+                <th>Profit</th>
+              </tr>
+            </thead>
+            <tbody id="historyTable"></tbody>
+          </table>
+        </div>
+
+        <div class="history-breakdowns">
+          <div class="mini-board">
+            <div class="section-head">
+              <div>
+                <p class="eyebrow">Desglose</p>
+                <h2>Por deporte</h2>
+              </div>
+            </div>
+            <div id="sportBreakdown" class="breakdown-list"></div>
+          </div>
+
+          <div class="mini-board">
+            <div class="section-head">
+              <div>
+                <p class="eyebrow">Desglose</p>
+                <h2>Por mercado</h2>
+              </div>
+            </div>
+            <div id="marketBreakdown" class="breakdown-list"></div>
+          </div>
+        </div>
+
+        <div class="history-breakdowns">
+          <div class="mini-board">
+            <div class="section-head">
+              <div>
+                <p class="eyebrow">Desglose</p>
+                <h2>Por liga</h2>
+              </div>
+            </div>
+            <div id="leagueBreakdown" class="breakdown-list"></div>
+          </div>
+        </div>
+
+        <div class="history-breakdowns">
+          <div class="mini-board">
+            <div class="section-head">
+              <div>
+                <p class="eyebrow">Rendimiento</p>
+                <h2>Por tipo de pick</h2>
+              </div>
+            </div>
+            <div id="pickTypeBreakdown" class="breakdown-list"></div>
+          </div>
+        </div>
+
+        <div class="history-breakdowns">
+          <div class="mini-board">
+            <div class="section-head">
+              <div>
+                <p class="eyebrow">CLV</p>
+                <h2>Por deporte</h2>
+              </div>
+            </div>
+            <div id="clvSportBreakdown" class="breakdown-list"></div>
+          </div>
+
+          <div class="mini-board">
+            <div class="section-head">
+              <div>
+                <p class="eyebrow">CLV</p>
+                <h2>Por mercado</h2>
+              </div>
+            </div>
+            <div id="clvMarketBreakdown" class="breakdown-list"></div>
+          </div>
+        </div>
+      </section>
+
+      <section class="board" aria-label="Watchlist y rendimiento">
+        <div class="section-head">
+          <div>
+            <p class="eyebrow">Control</p>
+            <h2>Watchlist y dashboard</h2>
+          </div>
+        </div>
+
+        <div class="watchlist-layout">
+          <div class="mini-board">
+            <div class="section-head">
+              <div>
+                <p class="eyebrow">Watchlist</p>
+                <h2>Equipos favoritos</h2>
+              </div>
+            </div>
+            <label>
+              Equipo
+              <input id="watchlistInput" type="text" placeholder="Ej. Dodgers, America, Lakers" />
+            </label>
+            <div class="history-actions">
+              <button id="addWatchlistBtn" class="ghost-btn" type="button">Agregar</button>
+              <button id="clearWatchlistBtn" class="ghost-btn" type="button">Limpiar</button>
+            </div>
+            <div id="watchlistItems" class="watchlist-items"></div>
+          </div>
+
+          <div class="mini-board">
+            <div class="section-head">
+              <div>
+                <p class="eyebrow">Dashboard</p>
+                <h2>Semanal y mensual</h2>
+              </div>
+            </div>
+            <div class="history-stats compact-stats">
+              <article>
+                <span id="weeklyWinRate">0%</span>
+                <p>Acierto semanal</p>
+              </article>
+              <article>
+                <span id="weeklyRoi">0%</span>
+                <p>ROI semanal</p>
+              </article>
+              <article>
+                <span id="monthlyWinRate">0%</span>
+                <p>Acierto mensual</p>
+              </article>
+              <article>
+                <span id="monthlyRoi">0%</span>
+                <p>ROI mensual</p>
+              </article>
+              <article>
+                <span id="yieldValue">0%</span>
+                <p>Yield</p>
+              </article>
+              <article>
+                <span id="drawdownValue">0%</span>
+                <p>Drawdown</p>
+              </article>
+            </div>
+            <div class="curve-shell">
+              <svg id="equityCurve" viewBox="0 0 100 36" preserveAspectRatio="none" class="equity-curve" aria-label="Curva de capital"></svg>
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <script src="config.js"></script>
+    <script src="app.js"></script>
+  </body>
+</html>
