@@ -1,146 +1,201 @@
-# Bot de Pronosticos Deportivos
+# Betting Bot Codex
 
-App web MVP para generar tips de futbol, MLB y NBA.
+Bot local de pronosticos deportivos para `Futbol`, `MLB`, `NBA` y `NFL`, con UI web, backend ligero en Node y una base de API propia en `sports_api_pro/`.
 
-## Abrir la app
+El proyecto esta pensado para:
 
-Servidor local iniciado:
+- generar picks y parlays
+- comparar odds reales y estimadas
+- calcular stake, EV, ROI y CLV
+- guardar historial, paper trading y auditoria
+- enviar tops y planes a Telegram
 
-```text
-http://127.0.0.1:5173/
-```
+## Que incluye
 
-Tambien puedes abrir `index.html` directamente en el navegador, aunque algunas APIs pueden bloquearse si el navegador no permite peticiones desde archivos locales.
+### App principal
 
-## APIs gratuitas incluidas
+- picks por deporte y liga
+- parlays:
+  - seguro
+  - del sueno
+  - bomba
+- ticket builder
+- plan de apuesta automatico
+- modo de apuesta:
+  - auto
+  - conservador
+  - normal
+  - agresivo
+  - solo valor
+- historial con ROI, banca, CLV y exportacion CSV
+- paper trading automatico
+- auditoria por:
+  - deporte
+  - mercado
+  - modo
+  - fechas
 
-- TheSportsDB: futbol y NBA. Usa la llave gratuita `123` o una llave propia.
-- MLB Stats API: calendario de MLB sin llave.
-- The Odds API: odds reales para moneyline, spreads y totals cuando la liga tiene cobertura.
-- balldontlie: NBA con API key, juegos, resultados recientes y otras estadisticas del ecosistema.
-- Sportradar: key guardada localmente para futura integracion via backend/proxy.
-- SportsDataIO: key guardada localmente para futura integracion de feeds de NBA, MLB, soccer y odds.
-- TheRundown: key guardada localmente para futura integracion de odds, schedules, scores y line movement.
-- Demo local: partidos de ejemplo cuando una API falla o no hay eventos proximos.
-- API interna del bot: normaliza partidos, historiales recientes, forma de equipos y odds estimadas para cada deporte.
+### Backend local
 
-## Configuracion de The Odds API
+- persistencia local en `data/`
+- jobs para:
+  - digest
+  - grade
+  - collect
+- envio a Telegram desde backend
+- cache de tops, historial, snapshots y paper trades
 
-La llave esta en `config.js`.
+### API propia base
 
-```js
-window.BOT_CONFIG = {
-  oddsApiKey: "TU_LLAVE",
-  oddsRegion: "us",
-  oddsMarkets: "h2h,spreads,totals",
-};
-```
+Dentro de [`sports_api_pro`](C:/Users/tsacl/Documents/Codex/2026-04-20-puedes-hacer-un-bot-de-pronosticos/sports_api_pro/README.md) ya hay un scaffold con:
 
-En una app publicada, conviene mover esta llave a un backend/proxy para no exponerla en el navegador.
+- FastAPI
+- PostgreSQL
+- Redis
+- workers de ingesta y resultados
+- analytics base:
+  - Poisson
+  - Log5
+  - Elo
+  - Kelly
 
-## Nota sobre Sportradar
+## Estructura principal
 
-La documentacion oficial de Sportradar indica que sus APIs son un servicio B2B y **no estan pensadas para llamarse directamente desde una aplicacion cliente**.
+- [`index.html`](C:/Users/tsacl/Documents/Codex/2026-04-20-puedes-hacer-un-bot-de-pronosticos/index.html)
+- [`styles.css`](C:/Users/tsacl/Documents/Codex/2026-04-20-puedes-hacer-un-bot-de-pronosticos/styles.css)
+- [`app.js`](C:/Users/tsacl/Documents/Codex/2026-04-20-puedes-hacer-un-bot-de-pronosticos/app.js)
+- [`serve.js`](C:/Users/tsacl/Documents/Codex/2026-04-20-puedes-hacer-un-bot-de-pronosticos/serve.js)
+- [`backend-jobs.js`](C:/Users/tsacl/Documents/Codex/2026-04-20-puedes-hacer-un-bot-de-pronosticos/backend-jobs.js)
+- [`sports_api_pro/`](C:/Users/tsacl/Documents/Codex/2026-04-20-puedes-hacer-un-bot-de-pronosticos/sports_api_pro)
 
-Referencias oficiales:
+## Como abrirlo
 
-- [Get Started](https://developer.sportradar.com/getting-started/docs/get-started)
-- [NBA API Basics](https://developer.sportradar.com/basketball/docs/nba-ig-api-basics)
-- [MLB API Basics](https://developer.sportradar.com/baseball/docs/mlb-ig-api-basics)
-- [Soccer API Basics](https://developer.sportradar.com/soccer/docs/soccer-ig-api-basics)
+### Opcion 1: abrir todo
 
-Por eso, la forma correcta de integrarla aqui es mediante un backend/proxy local o publicado que reciba las peticiones del frontend y firme las llamadas a Sportradar con la API key en servidor.
+Usa:
 
-## Nota sobre SportsDataIO
+- [`abrir-todo.cmd`](C:/Users/tsacl/Documents/Codex/2026-04-20-puedes-hacer-un-bot-de-pronosticos/abrir-todo.cmd)
 
-La documentacion oficial indica que:
+Esto intenta abrir:
 
-- la API acepta la key por query string o header `Ocp-Apim-Subscription-Key`
-- el Free Trial puede tener acceso limitado
-- el Free Trial puede devolver datos de prueba o "scrambled but realistic data"
+1. Sports API Pro
+2. bot principal
 
-Referencias oficiales:
+### Opcion 2: solo el bot principal
 
-- [NBA API docs](https://sportsdata.io/developers/api-documentation/nba)
-- [MLB API docs](https://sportsdata.io/developers/api-documentation/mlb)
-- [Soccer API docs](https://sportsdata.io/developers/api-documentation/soccer)
-- [Developer portal](https://sportsdata.io/developers)
+Usa:
 
-Para una app publicada, igual conviene usar un backend/proxy para no exponer la API key en el navegador.
+- [`abrir-bot.cmd`](C:/Users/tsacl/Documents/Codex/2026-04-20-puedes-hacer-un-bot-de-pronosticos/abrir-bot.cmd)
 
-## Nota sobre TheRundown
+Abre la app principal en:
 
-La documentacion oficial de TheRundown indica:
+- [http://127.0.0.1:5173/](http://127.0.0.1:5173/)
 
-- endpoint principal V2 para eventos con odds: `/api/v2/sports/{sportID}/events/{date}`
-- mercados base: `1` moneyline, `2` spread, `3` total
-- sport IDs utiles para este proyecto:
-  - `3` MLB
-  - `4` NBA
-  - `10` MLS
-  - `11` EPL
-  - `13` Bundesliga
-  - `14` La Liga
-  - `15` Serie A
-  - `16` Champions League
+### Opcion 3: modo trabajo
 
-Referencias oficiales:
+Si estas en una computadora con restricciones de red o navegador:
 
-- [TheRundown docs](https://docs.therundown.io/)
-- [Sports & Coverage](https://docs.therundown.io/reference/sports)
-- [Getting Live Odds](https://docs.therundown.io/guides/getting-live-odds)
+- [`abrir-modo-trabajo.cmd`](C:/Users/tsacl/Documents/Codex/2026-04-20-puedes-hacer-un-bot-de-pronosticos/abrir-modo-trabajo.cmd)
 
-## Ligas incluidas
+Este modo:
 
-- Premier League.
-- La Liga.
-- Bundesliga.
-- Serie A.
-- MLS.
-- Liga MX.
-- MLB.
-- NBA.
+- usa `localhost`
+- activa `workmode=1`
+- prioriza backend local
+- hace fallback a demo/cache cuando la red bloquea APIs externas
 
-## Tips que genera
+### Opcion 4: API propia
 
-- Ganador probable.
-- Over/under.
-- Spread/handicap.
-- Ambos anotan para futbol.
-- Odds estimadas por mercado.
-- Edge estimado contra la cuota calculada por el bot.
+Usa:
 
-## Parlays
+- [`sports_api_pro/abrir-api-pro.cmd`](C:/Users/tsacl/Documents/Codex/2026-04-20-puedes-hacer-un-bot-de-pronosticos/sports_api_pro/abrir-api-pro.cmd)
 
-- Parlay seguro: 2 selecciones con la mayor confianza disponible.
-- Parlay del sueño: 3 a 4 selecciones con balance entre confianza y pago potencial.
-- Parlay bomba: 4 a 6 selecciones agresivas, de alto riesgo.
+Swagger queda en:
 
-## Historial
+- [http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs)
 
-Cada pick y parlay tiene botones para:
+## Fuentes de datos soportadas
 
-- Guardar.
-- Marcar como ganado.
-- Marcar como perdido.
+- TheSportsDB
+- MLB Stats API
+- The Odds API
+- balldontlie
+- TheRundown
+- Backend del bot
+- Sports API Pro
+- Demo local
 
-El historial se guarda en el navegador con `localStorage` y calcula:
+Importante: el bot puede mezclar:
 
-- Picks/parlays guardados.
-- Porcentaje real de acierto.
-- ROI por unidad apostada.
-- Ganancia/perdida en unidades.
-- Banca actual segun banca inicial y stakes.
-- Stake por pick o parlay.
-- Desglose por deporte.
-- Desglose por mercado.
-- Exportacion a CSV.
+- datos reales
+- odds reales
+- reglas/modelo propio
+- fallback demo
 
-Tambien incluye:
+Por eso no todo pick significa automaticamente "pick real". En entornos con bloqueos de red, el proyecto puede caer en modo mixto o estimado.
 
-- Filtros por fecha, deporte y mercado.
-- Auto evaluacion de picks pendientes cuando la fuente trae marcador final compatible.
+## Configuracion
+
+### Frontend
+
+No subas tus llaves en [`config.js`](C:/Users/tsacl/Documents/Codex/2026-04-20-puedes-hacer-un-bot-de-pronosticos/config.js).
+
+Usa como referencia:
+
+- [`config.example.js`](C:/Users/tsacl/Documents/Codex/2026-04-20-puedes-hacer-un-bot-de-pronosticos/config.example.js)
+
+### API propia
+
+No subas:
+
+- `sports_api_pro/.env`
+
+Usa como referencia:
+
+- [`sports_api_pro/.env.example`](C:/Users/tsacl/Documents/Codex/2026-04-20-puedes-hacer-un-bot-de-pronosticos/sports_api_pro/.env.example)
+
+## Archivos ignorados en Git
+
+No se suben:
+
+- `config.js`
+- `sports_api_pro/.env`
+- `data/`
+- bases locales (`*.db`, `*.sqlite`, `*.sqlite3`)
+
+Esto es intencional para no exponer:
+
+- API keys
+- tokens de Telegram
+- historiales locales
+- snapshots de auditoria
+
+## Estado del proyecto
+
+Hoy el proyecto ya esta fuerte como MVP local:
+
+- interfaz completa
+- backend ligero
+- paper trading
+- auditoria
+- plan de stake
+- Telegram
+- scaffold de API propia
+
+Pero todavia no hay que venderlo como bot "garantizado". Lo que falta para volverlo mucho mas serio es:
+
+1. mas profundidad estadistica por deporte
+2. mayor consistencia de datos reales
+3. backtesting historico mas profundo
+4. paper trading con muestra mas larga
+5. centralizar aun mas la logica en backend
+
+## GitHub
+
+Repo actual:
+
+- [betting-bot-codex](https://github.com/carlosdemoreferencias2024-sketch/betting-bot-codex)
 
 ## Nota
 
-El modelo es una base inicial para analisis. No garantiza resultados ni ganancias. Para una version mas avanzada conviene agregar historiales reales, lesiones, cuotas, backtesting y registro de resultados.
+Este proyecto es una herramienta de analisis y experimentacion. No garantiza ganancias y no reemplaza gestion de banca, validacion de datos ni backtesting serio.
