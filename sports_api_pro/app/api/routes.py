@@ -44,7 +44,12 @@ def health(db: Session = Depends(get_db)):
 
 @router.get("/v1/sports")
 def list_sports():
-    return [{"key": key, "provider_key": value} for key, value in settings.sports_config.items()]
+    payload = []
+    for key, value in settings.sports_config.items():
+        provider_keys = value if isinstance(value, list) else [value]
+        for provider_key in provider_keys:
+            payload.append({"key": key, "provider_key": provider_key})
+    return payload
 
 
 @router.get("/v1/leagues")

@@ -8,3 +8,7 @@ sports_api_pro/.env
 node_modules/
 __pycache__/
 *.pyc
+tmp_analysis/
+vendor/pyespn_pydeps/
+vendor/pyespn_runtime/
+vendor/pyespn_venv/

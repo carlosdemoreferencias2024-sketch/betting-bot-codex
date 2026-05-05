@@ -36,12 +36,17 @@ class Settings(BaseSettings):
       )
 
     @property
-    def sports_config(self) -> dict[str, str]:
+    def sports_config(self) -> dict[str, str | list[str]]:
       return {
           "mlb": "baseball_mlb",
           "nba": "basketball_nba",
           "nfl": "americanfootball_nfl",
-          "soccer": "soccer_mexico_ligamx",
+          "soccer": [
+              "soccer_mexico_ligamx",
+              "soccer_uefa_champs_league",
+              "soccer_uefa_europa_league",
+              "soccer_uefa_europa_conference_league",
+          ],
       }
 
 

@@ -144,65 +144,69 @@ async def ingest_sport(db: Session, sport_name: str, sport_key: str) -> dict:
 
 async def ingest_all_sports(db: Session, sports_config: dict[str, str]) -> list[dict]:
     results = []
-    for sport_name, sport_key in sports_config.items():
-        try:
-            results.append(await ingest_sport(db, sport_name, sport_key))
-        except Exception as exc:
-            results.append({"sport": sport_name, "error": str(exc)})
+    for sport_name, sport_value in sports_config.items():
+        sport_keys = sport_value if isinstance(sport_value, list) else [sport_value]
+        for sport_key in sport_keys:
+            try:
+                results.append(await ingest_sport(db, sport_name, sport_key))
+            except Exception as exc:
+                results.append({"sport": sport_name, "league_key": sport_key, "error": str(exc)})
     return results
 
 
 async def update_finished_matches(db: Session, sports_config: dict[str, str]) -> list[dict]:
     updates = []
-    for sport_name, sport_key in sports_config.items():
-        try:
-            scores = await fetch_scores_by_sport(sport_key, days_from=2)
-        except Exception as exc:
-            updates.append({"sport": sport_name, "error": str(exc)})
-            continue
-
-        changed = 0
-        for item in scores:
-            if not item.get("completed"):
-                continue
-            fixture = db.execute(select(Fixture).where(Fixture.external_id == item["id"])).scalar_one_or_none()
-            if not fixture or fixture.status == "FINISHED":
+    for sport_name, sport_value in sports_config.items():
+        sport_keys = sport_value if isinstance(sport_value, list) else [sport_value]
+        for sport_key in sport_keys:
+            try:
+                scores = await fetch_scores_by_sport(sport_key, days_from=2)
+            except Exception as exc:
+                updates.append({"sport": sport_name, "league_key": sport_key, "error": str(exc)})
                 continue
 
-            score_map = {score["name"]: int(score["score"]) for score in item.get("scores", [])}
-            home_score = score_map.get(item["home_team"])
-            away_score = score_map.get(item["away_team"])
-            if home_score is None or away_score is None:
-                continue
+            changed = 0
+            for item in scores:
+                if not item.get("completed"):
+                    continue
+                fixture = db.execute(select(Fixture).where(Fixture.external_id == item["id"])).scalar_one_or_none()
+                if not fixture or fixture.status == "FINISHED":
+                    continue
 
-            winner_name = None
-            if home_score > away_score:
-                winner_name = fixture.home_team
-            elif away_score > home_score:
-                winner_name = fixture.away_team
-            else:
-                winner_name = "Draw"
+                score_map = {score["name"]: int(score["score"]) for score in item.get("scores", [])}
+                home_score = score_map.get(item["home_team"])
+                away_score = score_map.get(item["away_team"])
+                if home_score is None or away_score is None:
+                    continue
 
-            fixture.status = "FINISHED"
-            result = db.execute(select(MatchResult).where(MatchResult.fixture_id == fixture.id)).scalar_one_or_none()
-            if not result:
-                db.add(
-                    MatchResult(
-                        fixture_id=fixture.id,
-                        home_score=home_score,
-                        away_score=away_score,
-                        final_status="FINAL",
-                        winner_name=winner_name,
+                winner_name = None
+                if home_score > away_score:
+                    winner_name = fixture.home_team
+                elif away_score > home_score:
+                    winner_name = fixture.away_team
+                else:
+                    winner_name = "Draw"
+
+                fixture.status = "FINISHED"
+                result = db.execute(select(MatchResult).where(MatchResult.fixture_id == fixture.id)).scalar_one_or_none()
+                if not result:
+                    db.add(
+                        MatchResult(
+                            fixture_id=fixture.id,
+                            home_score=home_score,
+                            away_score=away_score,
+                            final_status="FINAL",
+                            winner_name=winner_name,
+                        )
                     )
-                )
-            perf_rows = db.execute(select(AlgoPerformance).where(AlgoPerformance.fixture_id == fixture.id)).scalars().all()
-            for perf in perf_rows:
-                perf.was_correct = perf.predicted_selection.lower() in {winner_name.lower(), item["home_team"].lower() if winner_name == fixture.home_team else "", item["away_team"].lower() if winner_name == fixture.away_team else ""}
-                perf.profit_loss = round(perf.market_odd_at_bet - 1, 2) if perf.was_correct else -1.0
-            db.commit()
-            changed += 1
+                perf_rows = db.execute(select(AlgoPerformance).where(AlgoPerformance.fixture_id == fixture.id)).scalars().all()
+                for perf in perf_rows:
+                    perf.was_correct = perf.predicted_selection.lower() in {winner_name.lower(), item["home_team"].lower() if winner_name == fixture.home_team else "", item["away_team"].lower() if winner_name == fixture.away_team else ""}
+                    perf.profit_loss = round(perf.market_odd_at_bet - 1, 2) if perf.was_correct else -1.0
+                db.commit()
+                changed += 1
 
-        updates.append({"sport": sport_name, "finished_updated": changed})
+            updates.append({"sport": sport_name, "league_key": sport_key, "finished_updated": changed})
     return updates
 
 

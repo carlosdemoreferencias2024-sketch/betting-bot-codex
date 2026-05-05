@@ -39,11 +39,19 @@
           <select id="leagueSelect"></select>
         </label>
 
+        <div class="quick-league-switch" aria-label="Acceso rapido UEFA">
+          <span class="quick-label">UEFA</span>
+          <button class="ghost-btn uefa-tab" type="button" data-uefa-league="4480">Champions</button>
+          <button class="ghost-btn uefa-tab" type="button" data-uefa-league="4481">Europa</button>
+          <button class="ghost-btn uefa-tab" type="button" data-uefa-league="5071">Conference</button>
+        </div>
+
         <label>
           API gratuita
           <select id="apiSelect">
             <option value="sportsapipro">Sports API Pro</option>
             <option value="auto">Auto</option>
+            <option value="sxbet">SX Bet</option>
             <option value="backend">Backend del bot</option>
             <option value="balldontlie">balldontlie NBA</option>
             <option value="therundown">TheRundown</option>
@@ -74,10 +82,29 @@
           Min. confianza
           <input id="confidenceSlider" type="range" min="45" max="75" value="52" />
         </label>
+        <label>
+          Confianza
+          <select id="confidenceModeSelect">
+            <option value="auto" selected>Automatica</option>
+            <option value="manual">Manual</option>
+          </select>
+        </label>
         <label class="toggle">
           <input id="valueOnlyToggle" type="checkbox" />
           Solo picks fuertes
         </label>
+        <label class="toggle">
+          <input id="realOnlyToggle" type="checkbox" />
+          Solo picks reales
+        </label>
+        <label class="toggle">
+          <input id="evStrongOnlyToggle" type="checkbox" />
+          Solo EV fuerte
+        </label>
+        <div class="confidence-auto-box">
+          <span class="quick-label">Motor confianza</span>
+          <strong id="confidenceAutoBadge">Auto</strong>
+        </div>
       </section>
 
       <section class="model-bar" aria-label="Gestion de banca">
@@ -123,6 +150,10 @@
           <p>Tips generados</p>
         </article>
         <article>
+          <span id="realTipsCount">0/0</span>
+          <p>Picks reales</p>
+        </article>
+        <article>
           <span id="avgConfidence">0%</span>
           <p>Confianza promedio</p>
         </article>
@@ -130,6 +161,87 @@
           <span id="oddsAlertsCount">0</span>
           <p>Alertas de cuota</p>
         </article>
+        <article>
+          <span id="evValidCount">0</span>
+          <p>Validos por EV</p>
+        </article>
+        <article>
+          <span id="evRejectedCount">0</span>
+          <p>Rechazados por filtro</p>
+        </article>
+      </section>
+
+      <section class="dashboard-nav" aria-label="Navegacion del dashboard">
+        <button class="ghost-btn dashboard-tab active" type="button" data-dashboard-view-btn="overview">Home</button>
+        <button class="ghost-btn dashboard-tab" type="button" data-dashboard-view-btn="picks">Picks</button>
+        <button class="ghost-btn dashboard-tab" type="button" data-dashboard-view-btn="markets">Mercados</button>
+        <button class="ghost-btn dashboard-tab" type="button" data-dashboard-view-btn="alerts">Alertas</button>
+        <button class="ghost-btn dashboard-tab" type="button" data-dashboard-view-btn="ops">Operacion</button>
+        <button class="ghost-btn dashboard-tab" type="button" data-dashboard-view-btn="backend">Backend</button>
+        <button class="ghost-btn dashboard-tab" type="button" data-dashboard-view-btn="audit">Auditoria</button>
+        <button class="ghost-btn dashboard-tab" type="button" data-dashboard-view-btn="history">Historial</button>
+        <button class="ghost-btn dashboard-tab" type="button" data-dashboard-view-btn="media">Redes</button>
+      </section>
+
+      <section class="board" aria-label="Dashboard ejecutivo">
+        <div class="section-head">
+          <div>
+            <p class="eyebrow">Executive View</p>
+            <h2>Resumen del dia</h2>
+          </div>
+          <span class="badge">Primero lo importante</span>
+        </div>
+        <div id="executiveHeroCard" class="executive-hero-card"></div>
+        <div class="executive-grid">
+          <article class="executive-card executive-main">
+            <div class="executive-label">Top del momento</div>
+            <div id="executiveTopPick" class="alerts-list"></div>
+            <div id="executiveHeroHighlights" class="executive-hero-highlights"></div>
+          </article>
+          <article class="executive-card">
+            <div class="executive-label">Slate y señal</div>
+            <div id="executiveSlateState" class="alerts-list"></div>
+          </article>
+          <article class="executive-card">
+            <div class="executive-label">Banca y riesgo</div>
+            <div id="executiveBankrollState" class="alerts-list"></div>
+          </article>
+          <article class="executive-card">
+            <div class="executive-label">Acciones rapidas</div>
+            <div id="executiveQuickActions" class="executive-actions">
+              <button class="ghost-btn" type="button" data-dashboard-action="picks">Ver picks</button>
+              <button class="ghost-btn" type="button" data-dashboard-action="markets">Mercados</button>
+              <button class="ghost-btn" type="button" data-dashboard-action="alerts">Alertas</button>
+              <button class="ghost-btn" type="button" data-dashboard-action="ops">Operacion</button>
+              <button class="ghost-btn" type="button" data-dashboard-action="backend">Backend</button>
+              <button class="ghost-btn" type="button" data-dashboard-action="audit">Auditoria</button>
+              <button class="ghost-btn" type="button" data-dashboard-action="media">Redes</button>
+            </div>
+          </article>
+        </div>
+        <div id="executivePulse" class="executive-pulse"></div>
+      </section>
+
+      <section class="board" aria-label="Radar automatico">
+        <div class="section-head">
+          <div>
+            <p class="eyebrow">Motor automatico</p>
+            <h2>Donde estan las buenas</h2>
+          </div>
+          <span id="autoConfidencePanelBadge" class="badge">Esperando slate</span>
+        </div>
+        <div id="autoConfidencePanel" class="alerts-list"></div>
+      </section>
+
+      <section class="board" aria-label="Resumen de filtro EV">
+        <div class="section-head">
+          <div>
+            <p class="eyebrow">Filtro EV</p>
+            <h2>Por que se cayeron picks</h2>
+          </div>
+          <span id="slateDemandBadge" class="badge">Slate normal</span>
+        </div>
+        <div id="evRejectReasonsPanel" class="alerts-list"></div>
       </section>
 
       <section class="content-grid">
@@ -193,6 +305,7 @@
         <div class="top-tabs">
           <button class="ghost-btn top-tab active" type="button" data-top-filter="all">Todos</button>
           <button class="ghost-btn top-tab" type="button" data-top-filter="soccer">Futbol</button>
+          <button class="ghost-btn top-tab" type="button" data-top-filter="uefa">UEFA</button>
           <button class="ghost-btn top-tab" type="button" data-top-filter="mlb">MLB</button>
           <button class="ghost-btn top-tab" type="button" data-top-filter="nba">NBA</button>
           <button class="ghost-btn top-tab" type="button" data-top-filter="nfl">NFL</button>
@@ -209,6 +322,60 @@
           <span class="badge">Confianza ajustada</span>
         </div>
         <div id="realTopPicksList" class="top-picks-list"></div>
+      </section>
+
+      <section class="board" aria-label="Operacion diaria">
+        <div class="section-head">
+          <div>
+            <p class="eyebrow">Operacion</p>
+            <h2>Flujo diario</h2>
+          </div>
+          <div class="history-actions">
+            <button id="sendSlateTopBtn" class="ghost-btn" type="button">Enviar top del slate</button>
+          </div>
+        </div>
+        <div class="history-stats" aria-label="Resumen diario">
+          <article>
+            <span id="dailySlateDate">-</span>
+            <p>Slate activo</p>
+          </article>
+          <article>
+            <span id="dailySlateTips">0</span>
+            <p>Picks del slate</p>
+          </article>
+          <article>
+            <span id="dailyRealSlateTips">0</span>
+            <p>Reales del slate</p>
+          </article>
+          <article>
+            <span id="dailySportsActive">0</span>
+            <p>Deportes activos</p>
+          </article>
+          <article>
+            <span id="dailyNextRun">-</span>
+            <p>Proxima corrida</p>
+          </article>
+        </div>
+        <div class="history-breakdowns">
+          <div class="mini-board">
+            <div class="section-head">
+              <div>
+                <p class="eyebrow">Runbook</p>
+                <h2>Resumen diario</h2>
+              </div>
+            </div>
+            <div id="dailyOpsPanel" class="alerts-list"></div>
+          </div>
+          <div class="mini-board">
+            <div class="section-head">
+              <div>
+                <p class="eyebrow">Deporte</p>
+                <h2>Top por deporte</h2>
+              </div>
+            </div>
+            <div id="dailySportOpsList" class="alerts-list"></div>
+          </div>
+        </div>
       </section>
 
       <section class="board" aria-label="Plan de apuesta">
@@ -236,6 +403,63 @@
         <div id="betModeHistoryPanel" class="alerts-list"></div>
       </section>
 
+      <section class="board" aria-label="Actividad backend">
+        <div class="section-head">
+          <div>
+            <p class="eyebrow">Backend</p>
+            <h2>Actividad y valor</h2>
+          </div>
+          <span id="backendActivityBadge" class="badge">Esperando backend</span>
+        </div>
+        <div class="history-stats" aria-label="Resumen backend">
+          <article>
+            <span id="backendLastRun">-</span>
+            <p>Ultima actividad</p>
+          </article>
+          <article>
+            <span id="backendJobRuns">0</span>
+            <p>Jobs auditados</p>
+          </article>
+          <article>
+            <span id="backendValueHits">0</span>
+            <p>Aportes de valor</p>
+          </article>
+          <article>
+            <span id="backendWarnings">0</span>
+            <p>Alertas</p>
+          </article>
+        </div>
+        <div class="history-breakdowns">
+          <div class="mini-board">
+            <div class="section-head">
+              <div>
+                <p class="eyebrow">Metricas</p>
+                <h2>Resumen de acciones</h2>
+              </div>
+            </div>
+            <div id="backendMetricsPanel" class="alerts-list"></div>
+          </div>
+          <div class="mini-board">
+            <div class="section-head">
+              <div>
+                <p class="eyebrow">Impacto</p>
+                <h2>Jobs que aportan valor</h2>
+              </div>
+            </div>
+            <div id="backendValuePanel" class="alerts-list"></div>
+          </div>
+        </div>
+        <div class="mini-board">
+          <div class="section-head">
+            <div>
+              <p class="eyebrow">Timeline</p>
+              <h2>Logs recientes</h2>
+            </div>
+          </div>
+          <div id="backendLogsPanel" class="alerts-list"></div>
+        </div>
+      </section>
+
       <section class="board" aria-label="Auditoria del bot">
         <div class="section-head">
           <div>
@@ -256,6 +480,7 @@
             <option value="history">Historial real</option>
             <option value="paper">Paper trading</option>
           </select>
+          <input id="auditMinSampleInput" type="number" min="1" step="1" value="5" placeholder="Min. muestra" />
         </div>
 
         <div class="history-stats" aria-label="Metricas de paper trading">
@@ -346,6 +571,108 @@
             <div id="auditRankingPanel" class="alerts-list"></div>
           </div>
         </div>
+
+        <div class="history-breakdowns">
+          <div class="mini-board">
+            <div class="section-head">
+              <div>
+                <p class="eyebrow">Modo</p>
+                <h2>CLV por modo</h2>
+              </div>
+            </div>
+            <div id="auditModeClvBreakdown" class="breakdown-list"></div>
+          </div>
+
+          <div class="mini-board">
+            <div class="section-head">
+              <div>
+                <p class="eyebrow">Confianza</p>
+                <h2>ROI por rango</h2>
+              </div>
+            </div>
+            <div id="auditConfidenceBreakdown" class="breakdown-list"></div>
+          </div>
+        </div>
+
+        <div class="history-breakdowns">
+          <div class="mini-board">
+            <div class="section-head">
+              <div>
+                <p class="eyebrow">Valor</p>
+                <h2>ROI por banda</h2>
+              </div>
+            </div>
+            <div id="auditValueBreakdown" class="breakdown-list"></div>
+          </div>
+        </div>
+
+        <div class="history-breakdowns">
+          <div class="mini-board">
+            <div class="section-head">
+              <div>
+                <p class="eyebrow">Riesgo</p>
+                <h2>Drawdown por modo</h2>
+              </div>
+            </div>
+            <div id="auditModeDrawdownBreakdown" class="breakdown-list"></div>
+          </div>
+
+          <div class="mini-board">
+            <div class="section-head">
+              <div>
+                <p class="eyebrow">Yield</p>
+                <h2>Por deporte y mercado</h2>
+              </div>
+            </div>
+            <div id="auditYieldBreakdown" class="breakdown-list"></div>
+          </div>
+        </div>
+
+        <div class="history-breakdowns">
+          <div class="mini-board">
+            <div class="section-head">
+              <div>
+                <p class="eyebrow">No bet</p>
+                <h2>Auditoria del freno</h2>
+              </div>
+            </div>
+            <div id="auditNoBetPanel" class="alerts-list"></div>
+          </div>
+        </div>
+      </section>
+
+      <section class="board" aria-label="Generador de imagen para redes">
+        <div class="section-head">
+          <div>
+            <p class="eyebrow">Redes</p>
+            <h2>Generador de imagen</h2>
+          </div>
+          <div class="history-actions">
+            <button id="downloadShareImageBtn" class="ghost-btn" type="button">Descargar PNG</button>
+          </div>
+        </div>
+        <div class="history-breakdowns">
+          <div class="mini-board">
+            <div class="section-head">
+              <div>
+                <p class="eyebrow">Preview</p>
+                <h2>Card social</h2>
+              </div>
+            </div>
+            <div id="shareImagePreview" class="share-preview">
+              <div class="empty">Selecciona un pick con el boton Imagen.</div>
+            </div>
+          </div>
+          <div class="mini-board">
+            <div class="section-head">
+              <div>
+                <p class="eyebrow">Detalle</p>
+                <h2>Texto listo</h2>
+              </div>
+            </div>
+            <div id="shareImageMeta" class="alerts-list"></div>
+          </div>
+        </div>
       </section>
 
       <section class="board" aria-label="Resumen para Telegram">
@@ -395,6 +722,17 @@
         <div id="oddsAlertsList" class="alerts-list"></div>
       </section>
 
+      <section class="board" aria-label="Centro de alertas">
+        <div class="section-head">
+          <div>
+            <p class="eyebrow">Alert Center</p>
+            <h2>Movimiento de valor</h2>
+          </div>
+          <span class="badge">EV+ en un solo lugar</span>
+        </div>
+        <div id="alertsCenterList" class="alerts-list"></div>
+      </section>
+
       <section class="board" aria-label="Validacion cruzada">
         <div class="section-head">
           <div>
@@ -407,7 +745,7 @@
       </section>
 
       <section class="content-grid">
-        <div class="board">
+        <div class="board" aria-label="Comparador de cuotas">
           <div class="section-head">
             <div>
               <p class="eyebrow">Books</p>
@@ -417,7 +755,7 @@
           <div id="booksCompareList" class="alerts-list"></div>
         </div>
 
-        <div class="board">
+        <div class="board" aria-label="Apertura vs actual">
           <div class="section-head">
             <div>
               <p class="eyebrow">Line Movement</p>
@@ -469,6 +807,20 @@
         <div id="externalSignalsList" class="alerts-list"></div>
       </section>
 
+      <section class="board" aria-label="Vista mercados">
+        <div class="section-head">
+          <div>
+            <p class="eyebrow">Markets</p>
+            <h2>Mercados por partido</h2>
+          </div>
+          <span class="badge">1X2 · Totales · Handicap · Props</span>
+        </div>
+        <div id="marketEventTabs" class="top-tabs"></div>
+        <div id="marketFamilyTabs" class="top-tabs"></div>
+        <div id="marketExplorerMeta" class="alert-meta"></div>
+        <div id="marketExplorerList" class="alerts-list"></div>
+      </section>
+
       <section class="board parlays-board" aria-label="Parlays recomendados">
         <div class="section-head">
           <div>
@@ -481,7 +833,7 @@
       </section>
 
       <section class="content-grid">
-        <div class="board">
+        <div class="board" aria-label="Picks recomendados">
           <div class="section-head">
             <div>
               <p class="eyebrow">Pronosticos</p>
@@ -492,7 +844,7 @@
           <div id="tipsList" class="tips-list"></div>
         </div>
 
-        <aside class="board">
+        <aside class="board" aria-label="Bitacora">
           <div class="section-head">
             <div>
               <p class="eyebrow">Bitacora</p>

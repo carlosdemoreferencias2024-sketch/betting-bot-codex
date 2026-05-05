@@ -2,6 +2,7 @@ const http = require("http");
 const fs = require("fs");
 const path = require("path");
 const vm = require("vm");
+const { spawn } = require("child_process");
 
 const root = __dirname;
 const port = 5173;
@@ -28,6 +29,8 @@ const storageFiles = {
   betModeHistory: path.join(dataDir, "bet-mode-history.json"),
   paperTrades: path.join(dataDir, "paper-trades.json"),
   backendStatus: path.join(dataDir, "backend-status.json"),
+  backendMetrics: path.join(dataDir, "backend-metrics.json"),
+  backendLogs: path.join(dataDir, "backend-logs.json"),
 };
 
 const sportProfiles = {
@@ -39,6 +42,9 @@ const sportProfiles = {
 
 const backendLeagues = [
   { sport: "soccer", leagueId: "4328", leagueName: "Premier League", oddsKey: "soccer_epl" },
+  { sport: "soccer", leagueId: "4480", leagueName: "UEFA Champions League", oddsKey: "soccer_uefa_champs_league" },
+  { sport: "soccer", leagueId: "4481", leagueName: "UEFA Europa League", oddsKey: "soccer_uefa_europa_league" },
+  { sport: "soccer", leagueId: "5071", leagueName: "UEFA Conference League", oddsKey: "soccer_uefa_europa_conference_league" },
   { sport: "soccer", leagueId: "4350", leagueName: "Liga MX", oddsKey: "soccer_mexico_ligamx" },
   { sport: "soccer", leagueId: "4429", leagueName: "FIFA World Cup", oddsKey: "soccer_fifa_world_cup" },
   { sport: "mlb", leagueId: "mlb", leagueName: "Major League Baseball", oddsKey: "baseball_mlb" },
@@ -62,6 +68,43 @@ function readJson(filePath, fallback) {
 function writeJson(filePath, value) {
   ensureDataDir();
   fs.writeFileSync(filePath, JSON.stringify(value, null, 2), "utf8");
+}
+
+function appendBackendLog(kind, action, detail, meta = {}) {
+  const logs = readJson(storageFiles.backendLogs, []);
+  logs.unshift({
+    id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    at: new Date().toISOString(),
+    kind,
+    action,
+    detail,
+    meta,
+  });
+  writeJson(storageFiles.backendLogs, logs.slice(0, 300));
+}
+
+function addBackendMetric(action, value = 1, meta = {}) {
+  const metrics = readJson(storageFiles.backendMetrics, []);
+  metrics.unshift({
+    id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    at: new Date().toISOString(),
+    action,
+    value: Number(value) || 0,
+    meta,
+  });
+  writeJson(storageFiles.backendMetrics, metrics.slice(0, 1000));
+}
+
+function summarizeMetrics(metrics = []) {
+  const grouped = {};
+  metrics.forEach((entry) => {
+    const key = entry.action || "unknown";
+    if (!grouped[key]) grouped[key] = { action: key, count: 0, total: 0, lastAt: null };
+    grouped[key].count += 1;
+    grouped[key].total += Number(entry.value) || 0;
+    if (!grouped[key].lastAt || String(entry.at || "") > grouped[key].lastAt) grouped[key].lastAt = entry.at;
+  });
+  return Object.values(grouped).sort((a, b) => b.lastAt.localeCompare(a.lastAt));
 }
 
 function normalizeName(value) {
@@ -101,6 +144,92 @@ function loadBotConfig() {
   }
 }
 
+function uniqueStrings(values = []) {
+  return [...new Set(values.filter(Boolean).map((value) => String(value).trim()).filter(Boolean))];
+}
+
+function resolvePythonCandidates() {
+  const config = loadBotConfig();
+  const home = process.env.USERPROFILE || process.env.HOME || "";
+  return uniqueStrings([
+    config.pythonExecutable,
+    home ? path.join(home, ".cache", "codex-runtimes", "codex-primary-runtime", "dependencies", "python", "python.exe") : "",
+    "py",
+    "python",
+  ]);
+}
+
+function runPythonJson(executable, args, stdinPayload, timeoutMs = 300000) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(executable, args, {
+      cwd: root,
+      windowsHide: true,
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+    let stdout = "";
+    let stderr = "";
+    let settled = false;
+    const timer = setTimeout(() => {
+      if (!settled) {
+        child.kill();
+        reject(new Error("PyESPN timeout"));
+      }
+    }, timeoutMs);
+
+    child.stdout.on("data", (chunk) => { stdout += String(chunk || ""); });
+    child.stderr.on("data", (chunk) => { stderr += String(chunk || ""); });
+    child.on("error", (error) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      reject(error);
+    });
+    child.on("close", (code) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      if (code !== 0) {
+        reject(new Error(stderr.trim() || `PyESPN termino con codigo ${code}`));
+        return;
+      }
+      try {
+        resolve(JSON.parse(stdout));
+      } catch (error) {
+        reject(new Error(`PyESPN devolvio JSON invalido: ${error.message}`));
+      }
+    });
+
+    child.stdin.write(stdinPayload || "");
+    child.stdin.end();
+  });
+}
+
+async function runPyEspnPropBatch({ league, season, recent = 5, names = [] }) {
+  const cleanNames = uniqueStrings(names).slice(0, 20);
+  if (!cleanNames.length) {
+    return { league, season, requested: [], resolved: {}, unresolved: [] };
+  }
+  const scriptPath = path.join(root, "tools", "pyespn_prop_batch.py");
+  if (!fs.existsSync(scriptPath)) {
+    throw new Error("No existe tools/pyespn_prop_batch.py");
+  }
+
+  const args = [scriptPath, "--league", String(league), "--season", String(season), "--recent", String(recent)];
+  const payload = JSON.stringify({ names: cleanNames });
+  const candidates = resolvePythonCandidates();
+  let lastError = null;
+
+  for (const candidate of candidates) {
+    try {
+      return await runPythonJson(candidate, args, payload);
+    } catch (error) {
+      lastError = error;
+    }
+  }
+
+  throw lastError || new Error("No se encontro un ejecutable de Python utilizable para PyESPN");
+}
+
 function sendJson(res, statusCode, payload) {
   res.writeHead(statusCode, { "Content-Type": "application/json; charset=utf-8" });
   res.end(JSON.stringify(payload));
@@ -133,6 +262,7 @@ function collectBody(req) {
 async function sendTelegramServerSide(text, summary = "Envio manual") {
   const config = loadBotConfig();
   if (!config.telegramBotToken || !config.telegramChatId) {
+    appendBackendLog("warn", "telegram.send", "Falta token o chat id de Telegram");
     throw new Error("Falta token o chat id de Telegram");
   }
 
@@ -150,6 +280,8 @@ async function sendTelegramServerSide(text, summary = "Envio manual") {
   }
 
   const payload = await response.json();
+  addBackendMetric("telegram_sent", 1, { summary });
+  appendBackendLog("info", "telegram.send", "Mensaje enviado por backend", { summary });
   const sentHistory = readJson(storageFiles.telegramSentHistory, []);
   sentHistory.unshift({
     kind: "Backend Telegram",
@@ -439,6 +571,7 @@ async function runDigestJob() {
   const topCache = {};
   const failures = [];
   let telegramError = null;
+  appendBackendLog("info", "job.digest.start", "Iniciando digest multideporte", { leagues: backendLeagues.length });
 
   for (const meta of backendLeagues) {
     try {
@@ -479,12 +612,20 @@ async function runDigestJob() {
   }
 
   writeBackendStatus();
+  addBackendMetric("job_digest_runs", 1, { failures: failures.length, sent: Boolean(telegram) });
+  appendBackendLog(
+    failures.length ? "warn" : "info",
+    "job.digest.finish",
+    failures.length ? "Digest completado con alertas" : "Digest completado",
+    { sports: Object.keys(topCache).length, failures, sent: Boolean(telegram), telegramError }
+  );
   return { topCache, failures, sent: Boolean(telegram), digestText, telegramError };
 }
 
 async function runBackendPicksJob() {
   const packages = {};
   const failures = [];
+  appendBackendLog("info", "job.picks.start", "Iniciando generacion de picks backend", { leagues: backendLeagues.length });
 
   for (const meta of backendLeagues) {
     try {
@@ -497,6 +638,13 @@ async function runBackendPicksJob() {
 
   writeJson(storageFiles.backendPicks, packages);
   writeBackendStatus();
+  addBackendMetric("job_picks_runs", 1, { buckets: Object.keys(packages).length, failures: failures.length });
+  appendBackendLog(
+    failures.length ? "warn" : "info",
+    "job.picks.finish",
+    failures.length ? "Picks backend completados con alertas" : "Picks backend completados",
+    { buckets: Object.keys(packages).length, failures }
+  );
   return { ok: true, count: Object.keys(packages).length, failures, packages };
 }
 
@@ -546,15 +694,26 @@ function mapOddsScoreToGame(scoreItem, fallbackSport = "") {
 
 async function runGradeJob() {
   const history = readJson(storageFiles.history, []);
+  appendBackendLog("info", "job.grade.start", "Iniciando autoevaluacion backend", { historyCount: history.length });
   const sportToOddsKey = {
     Futbol: "soccer_epl",
     MLB: "baseball_mlb",
     NBA: "basketball_nba",
     NFL: "americanfootball_nfl",
   };
+  const soccerLeagueKeys = Object.fromEntries(
+    backendLeagues
+      .filter((league) => league.sport === "soccer")
+      .map((league) => [league.leagueName, league.oddsKey]),
+  );
 
   const finalGames = [];
-  const usedKeys = [...new Set(history.map((record) => sportToOddsKey[record.sport]).filter(Boolean))];
+  const usedKeys = [...new Set(history.map((record) => {
+    if (record.sport === "Futbol") {
+      return soccerLeagueKeys[record.league] || sportToOddsKey[record.sport];
+    }
+    return sportToOddsKey[record.sport];
+  }).filter(Boolean))];
   const failures = [];
 
   for (const oddsKey of usedKeys) {
@@ -603,6 +762,13 @@ async function runGradeJob() {
   writeJson(storageFiles.history, updated);
   writeJson(storageFiles.statsSnapshot, buildStatsSnapshot(updated));
   writeBackendStatus();
+  addBackendMetric("job_grade_runs", 1, { changed, failures: failures.length, historyCount: updated.length });
+  appendBackendLog(
+    failures.length ? "warn" : "info",
+    "job.grade.finish",
+    failures.length ? "Autoevaluacion completada con alertas" : "Autoevaluacion completada",
+    { changed, failures, historyCount: updated.length }
+  );
   return { changed, failures, historyCount: updated.length };
 }
 
@@ -613,6 +779,8 @@ function buildBackendStatus() {
   const topCache = readJson(storageFiles.topCache, {});
   const backendPicks = readJson(storageFiles.backendPicks, {});
   const telegramSentHistory = readJson(storageFiles.telegramSentHistory, []);
+  const backendMetrics = readJson(storageFiles.backendMetrics, []);
+  const backendLogs = readJson(storageFiles.backendLogs, []);
 
   return {
     ok: true,
@@ -623,6 +791,8 @@ function buildBackendStatus() {
     lastStatsSnapshotAt: statsSnapshot?.updatedAt || null,
     lastBackendPicksAt: Object.values(backendPicks)[0]?.updatedAt || null,
     lastTelegramSentAt: telegramSentHistory[0]?.sentAt || null,
+    lastMetricAt: backendMetrics[0]?.at || null,
+    lastLogAt: backendLogs[0]?.at || null,
     updatedAt: new Date().toISOString(),
   };
 }
@@ -649,6 +819,63 @@ async function handleApi(req, res, pathname) {
 
   if (req.method === "GET" && pathname === "/api/status") {
     sendJson(res, 200, writeBackendStatus());
+    return true;
+  }
+
+  if (req.method === "GET" && pathname === "/api/metrics") {
+    const metrics = readJson(storageFiles.backendMetrics, []);
+    sendJson(res, 200, {
+      ok: true,
+      count: metrics.length,
+      summary: summarizeMetrics(metrics),
+      items: metrics.slice(0, 120),
+    });
+    return true;
+  }
+
+  if (req.method === "GET" && pathname === "/api/logs") {
+    const logs = readJson(storageFiles.backendLogs, []);
+    sendJson(res, 200, {
+      ok: true,
+      count: logs.length,
+      items: logs.slice(0, 120),
+    });
+    return true;
+  }
+
+  if (req.method === "POST" && pathname === "/api/pyespn/props") {
+    const body = await collectBody(req);
+    const league = String(body.league || "").toLowerCase();
+    const season = Number(body.season || 0);
+    const recent = Number(body.recent || 5);
+    const names = Array.isArray(body.names) ? body.names : [];
+    if (!["nfl", "nba"].includes(league)) {
+      sendJson(res, 400, { ok: false, error: "Liga PyESPN invalida" });
+      return true;
+    }
+    if (!season) {
+      sendJson(res, 400, { ok: false, error: "Temporada requerida" });
+      return true;
+    }
+    try {
+      appendBackendLog("info", "pyespn.props.start", "Resolviendo props por PyESPN", { league, season, requested: names.length });
+      const result = await runPyEspnPropBatch({ league, season, recent, names });
+      addBackendMetric("pyespn_props_runs", 1, {
+        league,
+        resolved: Object.keys(result.resolved || {}).length,
+        unresolved: (result.unresolved || []).length,
+      });
+      appendBackendLog("info", "pyespn.props.finish", "PyESPN resolvio props", {
+        league,
+        season,
+        resolved: Object.keys(result.resolved || {}).length,
+        unresolved: (result.unresolved || []).length,
+      });
+      sendJson(res, 200, { ok: true, ...result });
+    } catch (error) {
+      appendBackendLog("warn", "pyespn.props.error", error.message, { league, season, requested: names.length });
+      sendJson(res, 500, { ok: false, error: error.message });
+    }
     return true;
   }
 
@@ -683,6 +910,7 @@ async function handleApi(req, res, pathname) {
   if (req.method === "POST" && pathname === "/api/storage/history") {
     const body = await collectBody(req);
     writeJson(storageFiles.history, Array.isArray(body.items) ? body.items : []);
+    addBackendMetric("storage_history_sync", Array.isArray(body.items) ? body.items.length : 0);
     sendJson(res, 200, { ok: true });
     return true;
   }
@@ -718,6 +946,7 @@ async function handleApi(req, res, pathname) {
   if (req.method === "POST" && pathname === "/api/storage/paper-trades") {
     const body = await collectBody(req);
     writeJson(storageFiles.paperTrades, Array.isArray(body.items) ? body.items : []);
+    addBackendMetric("storage_paper_sync", Array.isArray(body.items) ? body.items.length : 0);
     sendJson(res, 200, { ok: true });
     return true;
   }
