@@ -230,6 +230,7 @@ const els = {
   valueOnly: document.querySelector("#valueOnlyToggle"),
   realOnly: document.querySelector("#realOnlyToggle"),
   evStrongOnly: document.querySelector("#evStrongOnlyToggle"),
+  soccerParlayScope: document.querySelector("#soccerParlayScopeSelect"),
   bankroll: document.querySelector("#bankrollInput"),
   stakeProfile: document.querySelector("#stakeProfileSelect"),
   betMode: document.querySelector("#betModeSelect"),
@@ -398,8 +399,8 @@ let latestBackendMetrics = [];
 let latestBackendLogs = [];
 let currentShareTipId = "";
 let currentDashboardView = "picks";
-let soccerParlayUniverseCache = { at: 0, apiChoice: "", tips: [] };
-let lotteryParlayUniverseCache = { at: 0, apiChoice: "", tips: [] };
+let soccerParlayUniverseCache = { at: 0, cacheKey: "", tips: [] };
+let lotteryParlayUniverseCache = { at: 0, cacheKey: "", tips: [] };
 let currentMarketEventId = "";
 let currentMarketFamily = "main";
 const workMode = new URLSearchParams(window.location.search).get("workmode") === "1";
@@ -877,11 +878,18 @@ async function fetchBackendPicksPackage(sport, leagueId) {
   return response.json();
 }
 
+function selectedSoccerParlayScope() {
+  return els.soccerParlayScope?.value || "all";
+}
+
 async function loadSoccerParlayUniverse(apiChoice = "auto") {
   const cacheTtlMs = 1000 * 60 * 8;
+  const scope = selectedSoccerParlayScope();
+  if (scope === "current") return [];
+  const cacheKey = `${apiChoice}|${scope}`;
   if (
     soccerParlayUniverseCache.tips.length &&
-    soccerParlayUniverseCache.apiChoice === apiChoice &&
+    soccerParlayUniverseCache.cacheKey === cacheKey &&
     Date.now() - soccerParlayUniverseCache.at < cacheTtlMs
   ) {
     return soccerParlayUniverseCache.tips;
@@ -902,7 +910,7 @@ async function loadSoccerParlayUniverse(apiChoice = "auto") {
   const tips = packages.flatMap((result) => (result.status === "fulfilled" ? result.value : []));
   soccerParlayUniverseCache = {
     at: Date.now(),
-    apiChoice,
+    cacheKey,
     tips,
   };
   return tips;
@@ -935,16 +943,21 @@ function extractUniverseTipsFromBackendPackage(backendPackage, league) {
 
 async function loadLotteryParlayUniverse(apiChoice = "auto") {
   const cacheTtlMs = 1000 * 60 * 8;
+  const scope = selectedSoccerParlayScope();
+  const cacheKey = `${apiChoice}|${scope}|${els.league.value}`;
   if (
     lotteryParlayUniverseCache.tips.length &&
-    lotteryParlayUniverseCache.apiChoice === apiChoice &&
+    lotteryParlayUniverseCache.cacheKey === cacheKey &&
     Date.now() - lotteryParlayUniverseCache.at < cacheTtlMs
   ) {
     return lotteryParlayUniverseCache.tips;
   }
 
+  const soccerUniverseLeagues = scope === "current"
+    ? (leagues.soccer || []).filter((league) => league.id === els.league.value)
+    : (leagues.soccer || []);
   const hybridLeagueList = [
-    ...(leagues.soccer || []),
+    ...soccerUniverseLeagues,
     ...(leagues.mlb || []),
   ];
   const packages = await Promise.allSettled(
@@ -962,7 +975,7 @@ async function loadLotteryParlayUniverse(apiChoice = "auto") {
   const tips = packages.flatMap((result) => (result.status === "fulfilled" ? result.value : []));
   lotteryParlayUniverseCache = {
     at: Date.now(),
-    apiChoice,
+    cacheKey,
     tips,
   };
   return tips;
@@ -4229,6 +4242,15 @@ function lotteryCompositionSummary(legs = []) {
   }, { conservative: 0, value: 0, aggressive: 0 });
 }
 
+function lotterySportSummary(legs = []) {
+  return legs.reduce((summary, tip) => {
+    const sport = tip?.game?.sport;
+    if (sport === "soccer") summary.soccer += 1;
+    if (sport === "mlb") summary.mlb += 1;
+    return summary;
+  }, { soccer: 0, mlb: 0 });
+}
+
 function selectSlateParlayLegs(tips, profile) {
   if (profile.name === "Parlay Loteria") {
     return buildLotteryParlayLegs(tips, profile);
@@ -4346,6 +4368,7 @@ function buildSlateParlays(primaryTips = [], candidateTips = []) {
         criteria: legs.map((tip) => `${tip.type}: ${tip.pick} · ${(tip.reason || trustLabelForTip(tip)).split(". ").slice(0, 1).join("")}`),
         badges: profile.name === "Parlay Loteria" ? ["Multiliga", "Futbol + MLB"] : [],
         composition: profile.name === "Parlay Loteria" ? lotteryCompositionSummary(legs) : null,
+        sportMix: profile.name === "Parlay Loteria" ? lotterySportSummary(legs) : null,
         sourceCount: candidatePool.length,
         note: profile.note,
       };
@@ -7487,6 +7510,7 @@ function renderParlays(parlays) {
       <li>
         <span class="leg-match">${tip.leagueName || sportProfiles[tip.game?.sport || "soccer"]?.apiName || "Liga"} · ${tip.game.away} @ ${tip.game.home}</span>
         <span class="leg-pick">${tip.type}: ${tip.pick} - ${tip.odds.toFixed(2)}x</span>
+        <span class="leg-book">${tip.bookmaker || "Book"} · ${tip.oddsSource || "Fuente mixta"}</span>
       </li>
     `).join("");
     const criteria = (parlay.criteria || []).map((item) => `<li>${item}</li>`).join("");
@@ -7499,6 +7523,17 @@ function renderParlays(parlays) {
             <span class="pill parlay-badge">${parlay.composition.conservative} conservadores</span>
             <span class="pill parlay-badge">${parlay.composition.value} value</span>
             <span class="pill parlay-badge">${parlay.composition.aggressive} agresivos</span>
+          </div>
+        </div>
+      `
+      : "";
+    const sportMix = parlay.sportMix
+      ? `
+        <div class="parlay-composition">
+          <p class="eyebrow">Mix por deporte</p>
+          <div class="pill-row">
+            <span class="pill parlay-badge">${parlay.sportMix.soccer} Futbol</span>
+            <span class="pill parlay-badge">${parlay.sportMix.mlb} MLB</span>
           </div>
         </div>
       `
@@ -7523,6 +7558,7 @@ function renderParlays(parlays) {
       </div>
       <p class="parlay-note">${parlay.note}</p>
       ${composition}
+      ${sportMix}
       ${criteria ? `
         <div class="parlay-criteria">
           <p class="eyebrow">Criterio</p>
@@ -7909,6 +7945,7 @@ els.valueOnly.addEventListener("change", () => {
 });
 els.evStrongOnly?.addEventListener("change", run);
 els.realOnly.addEventListener("change", run);
+els.soccerParlayScope?.addEventListener("change", run);
 els.bankroll.addEventListener("input", () => {
   renderHistory();
   renderBettingPlan(window.__lastRenderedTips || []);

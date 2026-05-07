@@ -604,6 +604,14 @@ button:hover {
   font-weight: 900;
 }
 
+.leg-book {
+  display: block;
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 0.76rem;
+  font-weight: 700;
+}
+
 .parlay-meta {
   display: grid;
   grid-template-columns: 1fr 1fr;
