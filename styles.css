@@ -530,6 +530,10 @@ button:hover {
   border-color: rgba(255, 107, 95, 0.72);
 }
 
+.parlay-card.lottery {
+  border-color: rgba(179, 126, 255, 0.72);
+}
+
 .parlay-top {
   display: flex;
   align-items: flex-start;
@@ -566,6 +570,11 @@ button:hover {
 .bomb .parlay-risk {
   background: rgba(255, 107, 95, 0.16);
   color: #ffb0aa;
+}
+
+.lottery .parlay-risk {
+  background: rgba(179, 126, 255, 0.16);
+  color: #dcc2ff;
 }
 
 .parlay-legs {
@@ -628,6 +637,41 @@ button:hover {
   color: var(--muted);
   font-size: 0.86rem;
   line-height: 1.4;
+}
+
+.parlay-note.subtle {
+  margin-top: 8px;
+  font-size: 0.78rem;
+  opacity: 0.82;
+}
+
+.parlay-badge-row {
+  margin-bottom: 10px;
+}
+
+.parlay-badge {
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.parlay-composition {
+  margin-top: 12px;
+}
+
+.parlay-criteria {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px dashed rgba(244, 247, 241, 0.12);
+}
+
+.parlay-criteria-list {
+  margin: 8px 0 0;
+  padding-left: 18px;
+  display: grid;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 0.82rem;
+  line-height: 1.35;
 }
 
 .track-row {
@@ -850,6 +894,123 @@ button:hover {
   gap: 12px;
 }
 
+.slate-table-shell {
+  overflow-x: auto;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgba(16, 21, 18, 0.6);
+}
+
+.slate-table {
+  width: 100%;
+  border-collapse: collapse;
+  min-width: 880px;
+}
+
+.slate-table th,
+.slate-table td {
+  padding: 12px 14px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  text-align: left;
+  vertical-align: top;
+}
+
+.slate-table th {
+  color: var(--muted);
+  font-size: 0.76rem;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.slate-row.bet {
+  background: rgba(82, 210, 115, 0.04);
+}
+
+.slate-row.value {
+  background: rgba(88, 166, 255, 0.04);
+}
+
+.slate-row.watch {
+  background: rgba(242, 193, 78, 0.04);
+}
+
+.slate-row.no-bet {
+  background: rgba(255, 107, 107, 0.03);
+}
+
+.slate-detail-row td {
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.slate-detail-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  padding: 8px 0;
+}
+
+.slate-match-cell,
+.slate-main-pick,
+.slate-subpick {
+  display: block;
+}
+
+.slate-match-cell strong,
+.slate-main-pick {
+  font-weight: 800;
+}
+
+.slate-match-cell span,
+.slate-subpick {
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 0.84rem;
+}
+
+.slate-row-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.slate-market-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.slate-market-pill {
+  display: inline-flex;
+  align-items: center;
+  width: fit-content;
+  max-width: 100%;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 999px;
+  padding: 4px 10px;
+  font-size: 0.8rem;
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.slate-market-pill.primary {
+  border-color: rgba(82, 210, 115, 0.35);
+  background: rgba(82, 210, 115, 0.08);
+  color: #c6f7d2;
+}
+
+.compact-stake {
+  width: 88px;
+  min-height: 36px;
+}
+
+.slate-action-text {
+  color: var(--muted);
+  font-size: 0.84rem;
+  font-weight: 700;
+}
+
 .tip-card {
   display: grid;
   grid-template-columns: 1fr auto;
@@ -1051,6 +1212,33 @@ button:hover {
   border-radius: 8px;
   background: var(--panel-2);
   padding: 14px;
+}
+
+.slate-game-card.bet {
+  border-color: rgba(82, 210, 115, 0.34);
+}
+
+.slate-game-card.value {
+  border-color: rgba(88, 166, 255, 0.34);
+}
+
+.slate-game-card.watch {
+  border-color: rgba(242, 193, 78, 0.28);
+}
+
+.slate-game-card.no-bet {
+  border-color: rgba(255, 107, 107, 0.26);
+  opacity: 0.92;
+}
+
+.slate-game-card .section-head {
+  margin-bottom: 8px;
+}
+
+.secondary-pick {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
 }
 
 .top-rank {

@@ -3,6 +3,7 @@ window.BOT_CONFIG = {
   balldontlieApiKey: "replace_me",
   sportradarApiKey: "replace_me",
   sportsdataApiKey: "replace_me",
+  sportsDataIoApiKey: "replace_me",
   pythonExecutable: "python",
   theRundownApiKey: "replace_me",
   telegramBotToken: "replace_me",

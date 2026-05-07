@@ -46,6 +46,8 @@ class Settings(BaseSettings):
               "soccer_uefa_champs_league",
               "soccer_uefa_europa_league",
               "soccer_uefa_europa_conference_league",
+              "soccer_brazil_campeonato",
+              "soccer_argentina_primera_division",
           ],
       }
 

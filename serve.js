@@ -45,6 +45,12 @@ const backendLeagues = [
   { sport: "soccer", leagueId: "4480", leagueName: "UEFA Champions League", oddsKey: "soccer_uefa_champs_league" },
   { sport: "soccer", leagueId: "4481", leagueName: "UEFA Europa League", oddsKey: "soccer_uefa_europa_league" },
   { sport: "soccer", leagueId: "5071", leagueName: "UEFA Conference League", oddsKey: "soccer_uefa_europa_conference_league" },
+  { sport: "soccer", leagueId: "4351", leagueName: "Brazilian Serie A", oddsKey: "soccer_brazil_campeonato" },
+  { sport: "soccer", leagueId: "4406", leagueName: "Argentinian Primera Division", oddsKey: "soccer_argentina_primera_division" },
+  { sport: "soccer", leagueId: "4335", leagueName: "La Liga", oddsKey: "soccer_spain_la_liga" },
+  { sport: "soccer", leagueId: "4331", leagueName: "Bundesliga", oddsKey: "soccer_germany_bundesliga" },
+  { sport: "soccer", leagueId: "4332", leagueName: "Serie A", oddsKey: "soccer_italy_serie_a" },
+  { sport: "soccer", leagueId: "4346", leagueName: "MLS", oddsKey: "soccer_usa_mls" },
   { sport: "soccer", leagueId: "4350", leagueName: "Liga MX", oddsKey: "soccer_mexico_ligamx" },
   { sport: "soccer", leagueId: "4429", leagueName: "FIFA World Cup", oddsKey: "soccer_fifa_world_cup" },
   { sport: "mlb", leagueId: "mlb", leagueName: "Major League Baseball", oddsKey: "baseball_mlb" },
@@ -1011,7 +1017,12 @@ function serveStatic(req, res, pathname) {
     }
 
     const ext = path.extname(filePath).toLowerCase();
-    res.writeHead(200, { "Content-Type": mimeTypes[ext] || "application/octet-stream" });
+    res.writeHead(200, {
+      "Content-Type": mimeTypes[ext] || "application/octet-stream",
+      "Cache-Control": "no-store, no-cache, must-revalidate, proxy-revalidate",
+      Pragma: "no-cache",
+      Expires: "0",
+    });
     res.end(data);
   });
 }

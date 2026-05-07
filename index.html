@@ -172,8 +172,8 @@
       </section>
 
       <section class="dashboard-nav" aria-label="Navegacion del dashboard">
-        <button class="ghost-btn dashboard-tab active" type="button" data-dashboard-view-btn="overview">Home</button>
-        <button class="ghost-btn dashboard-tab" type="button" data-dashboard-view-btn="picks">Picks</button>
+        <button class="ghost-btn dashboard-tab active" type="button" data-dashboard-view-btn="picks">Picks</button>
+        <button class="ghost-btn dashboard-tab" type="button" data-dashboard-view-btn="overview">Home</button>
         <button class="ghost-btn dashboard-tab" type="button" data-dashboard-view-btn="markets">Mercados</button>
         <button class="ghost-btn dashboard-tab" type="button" data-dashboard-view-btn="alerts">Alertas</button>
         <button class="ghost-btn dashboard-tab" type="button" data-dashboard-view-btn="ops">Operacion</button>
@@ -282,8 +282,8 @@
       <section class="board" aria-label="Calendario diario">
         <div class="section-head">
           <div>
-            <p class="eyebrow">Calendario</p>
-            <h2>Picks por fecha</h2>
+            <p class="eyebrow">Apoyo</p>
+            <h2>Calendario del slate</h2>
           </div>
           <div class="history-actions">
             <input id="calendarDateInput" type="date" />
@@ -291,6 +291,7 @@
           </div>
         </div>
         <div id="calendarSummary" class="alert-meta"></div>
+        <div id="calendarDateChips" class="top-tabs"></div>
         <div id="calendarPicksList" class="calendar-picks-list"></div>
       </section>
 
@@ -836,10 +837,10 @@
         <div class="board" aria-label="Picks recomendados">
           <div class="section-head">
             <div>
-              <p class="eyebrow">Pronosticos</p>
-              <h2>Picks recomendados</h2>
+              <p class="eyebrow">Slate principal</p>
+              <h2>Mejor pick por partido</h2>
             </div>
-            <span id="sourceBadge" class="badge">Listo</span>
+            <span id="sourceBadge" class="badge">Vista principal</span>
           </div>
           <div id="tipsList" class="tips-list"></div>
         </div>
