@@ -231,6 +231,7 @@ const els = {
   realOnly: document.querySelector("#realOnlyToggle"),
   evStrongOnly: document.querySelector("#evStrongOnlyToggle"),
   soccerParlayScope: document.querySelector("#soccerParlayScopeSelect"),
+  soccerTopThree: document.querySelector("#soccerTopThreeToggle"),
   bankroll: document.querySelector("#bankrollInput"),
   stakeProfile: document.querySelector("#stakeProfileSelect"),
   betMode: document.querySelector("#betModeSelect"),
@@ -3280,6 +3281,23 @@ function groupedMarketsForSlateGame(tips, game) {
     buckets[family].push(tip);
   });
   return buckets;
+}
+
+function topSlateMarketsForDisplay(tips, game) {
+  const ranked = rankedTipsForSlateGame(tips, game);
+  if (!ranked.length) return [];
+  const sport = ranked[0]?.game?.sport || game?.sport || "";
+  const limit = sport === "soccer" ? 3 : 2;
+  return ranked.slice(0, limit);
+}
+
+function visibleSlateMarketTips(tips, game) {
+  const ranked = rankedTipsForSlateGame(tips, game);
+  const sport = ranked[0]?.game?.sport || game?.sport || "";
+  if (sport === "soccer" && els.soccerTopThree?.checked) {
+    return ranked.slice(0, 3);
+  }
+  return ranked.slice(0, 5);
 }
 
 function recommendationActionForTip(tip) {
@@ -7280,7 +7298,8 @@ function renderTips(tips) {
       const suggestedStake = recommendedStakeForTip(tip);
       const grade = recommendationGradeMeta(tip);
       const action = recommendationActionForTip(tip);
-      const rankedTips = rankedTipsForSlateGame(candidatePool, game).slice(0, 5);
+      const rankedTips = visibleSlateMarketTips(candidatePool, game);
+      const topMarkets = topSlateMarketsForDisplay(candidatePool, game);
       const marketGroups = groupedMarketsForSlateGame(candidatePool, game);
       const secondaryTip = rankedTips.find((item) => tipId(item) !== id) || null;
       currentTrackingItems[id] = { kind: "tip", payload: tip };
@@ -7295,6 +7314,17 @@ function renderTips(tips) {
           <td>
             <span class="slate-main-pick">${tip.type}: ${tip.pick}</span>
             <span class="slate-subpick">${secondaryTip ? `Alt: ${secondaryTip.type}: ${secondaryTip.pick}` : grade.label}</span>
+            ${topMarkets.length > 1 ? `
+              <div class="slate-top-market-list">
+                ${topMarkets.map((marketTip, index) => `
+                  <div class="slate-top-market-item ${index === 0 ? "primary" : ""}">
+                    <strong>${index + 1}. ${marketTip.type}</strong>
+                    <span>${marketTip.pick}</span>
+                    <em>${marketTip.odds.toFixed(2)}x · EV ${marketTip.ev > 0 ? "+" : ""}${marketTip.ev}%</em>
+                  </div>
+                `).join("")}
+              </div>
+            ` : ""}
           </td>
           <td>
             <div class="slate-market-stack">
@@ -7983,6 +8013,9 @@ els.valueOnly.addEventListener("change", () => {
 els.evStrongOnly?.addEventListener("change", run);
 els.realOnly.addEventListener("change", run);
 els.soccerParlayScope?.addEventListener("change", run);
+els.soccerTopThree?.addEventListener("change", () => {
+  renderTips(window.__lastRenderedTips || []);
+});
 els.bankroll.addEventListener("input", () => {
   renderHistory();
   renderBettingPlan(window.__lastRenderedTips || []);
