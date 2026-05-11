@@ -7066,10 +7066,55 @@ async function loadDataPackage() {
   };
 
   if (isAllSoccerSelection()) {
-    log("Futbol total activo. Juntando ligas de futbol via backend concentrador.");
+    log("Futbol total activo. Juntando ligas de futbol con fuentes reales y fallback controlado.");
     const packages = await Promise.allSettled(
       (leagues.soccer || []).map(async (league) => {
-        const backendPackage = await fetchBackendPicksPackage("soccer", league.id);
+        let backendPackage = null;
+        let games = [];
+        let recentGames = [];
+        let oddsEvents = [];
+        let validationGames = [];
+        let externalRef = { source: "base", standings: {}, injuries: {} };
+        let tips = [];
+
+        try {
+          backendPackage = await fetchBackendPicksPackage("soccer", league.id);
+          games = backendPackage.games || [];
+          recentGames = backendPackage.recentGames || [];
+          oddsEvents = backendPackage.oddsEvents || [];
+          validationGames = backendPackage.validationGames || [];
+          externalRef = backendPackage.externalRef || externalRef;
+          tips = backendPackage.tips || [];
+        } catch (error) {
+          backendPackage = null;
+        }
+
+        if (!games.length && apiChoice !== "backend") {
+          try {
+            const upcoming = await sportsDataApi.getUpcomingGames({ sport: "soccer", leagueId: league.id, apiChoice });
+            games = upcoming.games || [];
+            oddsEvents = upcoming.oddsEvents || oddsEvents;
+          } catch (error) {
+            games = games || [];
+          }
+          try {
+            recentGames = await sportsDataApi.getRecentGames({ sport: "soccer", leagueId: league.id, apiChoice });
+          } catch (error) {
+            recentGames = recentGames || [];
+          }
+          try {
+            const validationPackage = await fetchValidationGames("soccer", league.id, apiChoice);
+            validationGames = validationPackage.games || validationGames;
+          } catch (error) {
+            validationGames = validationGames || [];
+          }
+          try {
+            externalRef = await fetchExternalReferencePackage("soccer", league.id);
+          } catch (error) {
+            externalRef = externalRef || { source: "base", standings: {}, injuries: {} };
+          }
+        }
+
         const annotate = (game) => ({
           ...game,
           leagueId: game?.leagueId || league.id,
@@ -7077,12 +7122,12 @@ async function loadDataPackage() {
         });
         return {
           league,
-          games: (backendPackage.games || []).map(annotate),
-          recentGames: (backendPackage.recentGames || []).map(annotate),
-          oddsEvents: backendPackage.oddsEvents || [],
-          validationGames: (backendPackage.validationGames || []).map(annotate),
-          externalRef: backendPackage.externalRef || { source: "backend", standings: {}, injuries: {} },
-          tips: (backendPackage.tips || []).map((tip) => ({
+          games: (games || []).map(annotate),
+          recentGames: (recentGames || []).map(annotate),
+          oddsEvents: oddsEvents || [],
+          validationGames: (validationGames || []).map(annotate),
+          externalRef: externalRef || { source: "base", standings: {}, injuries: {} },
+          tips: (tips || []).map((tip) => ({
             ...tip,
             leagueId: tip?.leagueId || league.id,
             leagueName: tip?.leagueName || league.name,
