@@ -476,9 +476,11 @@ function dashboardViewRegistry() {
       '[aria-label="Calendario diario"]',
       '[aria-label="Top picks reales del dia"]',
       '[aria-label="Consenso final"]',
+      '[aria-label="Bitacora"]',
+    ],
+    parlays: [
       '[aria-label="Parlays recomendados"]',
       '[aria-label="Ticket builder"]',
-      '[aria-label="Bitacora"]',
     ],
     markets: [
       '[aria-label="Vista mercados"]',
@@ -4286,6 +4288,7 @@ function buildSlateParlays(primaryTips = [], candidateTips = []) {
   const dominantSport = Object.entries(sportCounts).sort((a, b) => b[1] - a[1])[0]?.[0] || "";
   const soccerMode = dominantSport === "soccer";
   const focusedSports = dominantSport ? [dominantSport] : undefined;
+  const soccerScopeLabel = selectedSoccerParlayScope() === "current" ? "Solo liga actual" : "Todas las ligas";
   const profiles = [
     {
       name: "Parlay seguro",
@@ -4357,7 +4360,17 @@ function buildSlateParlays(primaryTips = [], candidateTips = []) {
         ...profile,
         sorter: (items) => [...items].sort((a, b) => slateParlayLegScore(b, profile) - slateParlayLegScore(a, profile)),
       };
+      const eligibleLegs = candidatePool.filter((tip) =>
+        (!profile.allowedSports || profile.allowedSports.includes(tip?.game?.sport)) &&
+        (!profile.allowTip || profile.allowTip(tip)) &&
+        Number(tip.confidence || 0) >= Number(profile.minConfidence || 0) &&
+        Number(tip.ev || 0) >= Number(profile.minEv || 0) &&
+        trustScoreForTip(tip) >= Number(profile.minTrust || 0) &&
+        Number(tip.odds || 0) <= Number(profile.maxLegOdds || 99) &&
+        (!profile.avoidProps || marketFamilyMeta(tip).key !== "props")
+      );
       const legs = selectSlateParlayLegs(candidatePool, scorerProfile);
+      const soccerScoped = (profile.allowedSports || []).includes("soccer") || dominantSport === "soccer";
       return {
         name: profile.name,
         className: profile.className,
@@ -4369,6 +4382,8 @@ function buildSlateParlays(primaryTips = [], candidateTips = []) {
         badges: profile.name === "Parlay Loteria" ? ["Multiliga", "Futbol + MLB"] : [],
         composition: profile.name === "Parlay Loteria" ? lotteryCompositionSummary(legs) : null,
         sportMix: profile.name === "Parlay Loteria" ? lotterySportSummary(legs) : null,
+        scopeLabel: soccerScoped ? soccerScopeLabel : "",
+        availableLegs: uniqueByGame(eligibleLegs).length,
         sourceCount: candidatePool.length,
         note: profile.note,
       };
@@ -7514,7 +7529,8 @@ function renderParlays(parlays) {
       </li>
     `).join("");
     const criteria = (parlay.criteria || []).map((item) => `<li>${item}</li>`).join("");
-    const badges = (parlay.badges || []).map((badge) => `<span class="pill parlay-badge">${badge}</span>`).join("");
+    const parlayBadges = [...(parlay.badges || []), ...(parlay.scopeLabel ? [parlay.scopeLabel] : [])];
+    const badges = parlayBadges.map((badge) => `<span class="pill parlay-badge">${badge}</span>`).join("");
     const composition = parlay.composition
       ? `
         <div class="parlay-composition">
@@ -7557,6 +7573,7 @@ function renderParlays(parlays) {
         </div>
       </div>
       <p class="parlay-note">${parlay.note}</p>
+      <p class="parlay-note subtle">Piernas disponibles antes del corte: ${parlay.availableLegs || parlay.legs.length}.</p>
       ${composition}
       ${sportMix}
       ${criteria ? `
@@ -7621,12 +7638,49 @@ function renderEvRejectReasons(reasons = {}, { strongOnly = false, valid = 0, re
   ].join("");
 }
 
+async function safelyBuildAndRenderParlays({
+  sport,
+  apiChoice,
+  tips,
+  rawTips,
+  fallbackTips,
+  mixedFallbackTips,
+  settings,
+}) {
+  try {
+    const soccerParlayUniverse = sport === "soccer" ? await loadSoccerParlayUniverse(apiChoice) : [];
+    const lotteryParlayUniverse = ["soccer", "mlb"].includes(sport) ? await loadLotteryParlayUniverse(apiChoice) : [];
+    const parlayCandidates = [
+      ...(rawTips || []),
+      ...(fallbackTips || []),
+      ...((settings?.realOnly ? mixedFallbackTips : []) || []),
+      ...soccerParlayUniverse,
+      ...lotteryParlayUniverse,
+    ];
+    const parlays = buildSlateParlays(tips, parlayCandidates);
+    renderParlays(parlays);
+    if (sport === "soccer" && soccerParlayUniverse.length) {
+      log(`Parlays futbol: universo ampliado con ${soccerParlayUniverse.length} candidato(s) de ligas adicionales.`);
+    }
+    if (["soccer", "mlb"].includes(sport) && lotteryParlayUniverse.length) {
+      log(`Parlay loteria: universo mixto con ${lotteryParlayUniverse.length} candidato(s) de futbol + MLB.`);
+    }
+    return parlays;
+  } catch (error) {
+    renderParlays([]);
+    log(`Parlays separados: no se pudieron construir sin afectar picks. Detalle: ${error.message}`);
+    return [];
+  }
+}
+
 async function run() {
   setLoading(true);
   els.source.textContent = "Analizando";
   renderOpenBotHelp();
 
   try {
+    const sport = els.sport.value;
+    const apiChoice = els.api.value || "auto";
     const dataPackage = await loadDataPackage();
     const normalizedGames = dataPackage.games.length ? dataPackage.games : demoGames[els.sport.value];
     const targetSlateDate = selectTargetSlateDate(normalizedGames);
@@ -7682,15 +7736,10 @@ async function run() {
     const tips = rescueTipsIfEmpty(ensureSafePicks(passedRawTips, passedFallbackTips), settings.realOnly ? mixedFallbackTips : fallbackTips);
     window.__lastRenderedTips = tips;
     cacheRealTopTips(tips, dataPackage);
-    const soccerParlayUniverse = sport === "soccer" ? await loadSoccerParlayUniverse(apiChoice) : [];
-    const lotteryParlayUniverse = ["soccer", "mlb"].includes(sport) ? await loadLotteryParlayUniverse(apiChoice) : [];
-    const parlayCandidates = [...rawTips, ...fallbackTips, ...(settings.realOnly ? mixedFallbackTips : []), ...soccerParlayUniverse, ...lotteryParlayUniverse];
-    const parlays = buildSlateParlays(tips, parlayCandidates);
     const oddsAlerts = buildOddsAlerts(tips);
     currentTrackingItems = {};
     setDashboardView("picks");
     renderTips(tips);
-    renderParlays(parlays);
     renderTopPicks(tips);
     renderRealTopPicks(tips);
     syncShareCardFromTips(tips);
@@ -7742,15 +7791,11 @@ async function run() {
     await bootstrapBackendTelemetry();
     renderBackendActivity();
     els.source.textContent = dataPackage.games.length ? dataSourceLabels[dataPackage.source] || "API/Datos OK" : "Demo";
-    if (sport === "soccer" && soccerParlayUniverse.length) {
-      log(`Parlays futbol: universo ampliado con ${soccerParlayUniverse.length} candidato(s) de ligas adicionales.`);
-    }
-    if (["soccer", "mlb"].includes(sport) && lotteryParlayUniverse.length) {
-      log(`Parlay loteria: universo mixto con ${lotteryParlayUniverse.length} candidato(s) de futbol + MLB.`);
-    }
+    const parlays = await safelyBuildAndRenderParlays({ sport, apiChoice, tips, rawTips, fallbackTips, mixedFallbackTips, settings });
     log(`Listo: slate ${targetSlateDate} con ${slateGames.length} partido(s), ${dataPackage.recentGames.length} resultados recientes, ${tips.length} tips y ${parlays.length} parlays.`);
   } catch (error) {
     const games = demoGames[els.sport.value];
+    const sport = els.sport.value;
     const targetSlateDate = selectTargetSlateDate(games);
     currentCalendarDate = targetSlateDate;
     const slateGames = slateGamesForDate(games, targetSlateDate);
@@ -7797,14 +7842,10 @@ async function run() {
     const tips = rescueTipsIfEmpty(ensureSafePicks(passedRawTips, passedFallbackTips), settings.realOnly ? mixedFallbackTips : fallbackTips);
     window.__lastRenderedTips = tips;
     cacheRealTopTips(tips, { sport: els.sport.value, leagueId: leagueMeta?.id || "", leagueName: leagueMeta?.name || "" });
-    const soccerParlayUniverse = els.sport.value === "soccer" ? await loadSoccerParlayUniverse("backend") : [];
-    const lotteryParlayUniverse = ["soccer", "mlb"].includes(els.sport.value) ? await loadLotteryParlayUniverse("backend") : [];
-    const parlays = buildSlateParlays(tips, [...rawTips, ...fallbackTips, ...(settings.realOnly ? mixedFallbackTips : []), ...soccerParlayUniverse, ...lotteryParlayUniverse]);
     const oddsAlerts = buildOddsAlerts(tips);
     currentTrackingItems = {};
     setDashboardView("picks");
     renderTips(tips);
-    renderParlays(parlays);
     renderTopPicks(tips);
     renderRealTopPicks(tips);
     syncShareCardFromTips(tips);
@@ -7847,13 +7888,9 @@ async function run() {
     await bootstrapBackendTelemetry();
     renderBackendActivity();
     els.source.textContent = "Demo";
-    if (els.sport.value === "soccer" && soccerParlayUniverse.length) {
-      log(`Parlays futbol: universo ampliado con ${soccerParlayUniverse.length} candidato(s) de ligas adicionales.`);
-    }
-    if (["soccer", "mlb"].includes(els.sport.value) && lotteryParlayUniverse.length) {
-      log(`Parlay loteria: universo mixto con ${lotteryParlayUniverse.length} candidato(s) de futbol + MLB.`);
-    }
+    const parlays = await safelyBuildAndRenderParlays({ sport, apiChoice: "backend", tips, rawTips, fallbackTips, mixedFallbackTips, settings });
     log(`No se pudo conectar con la API. Se uso demo local para el slate ${targetSlateDate}. Detalle: ${error.message}`);
+    log(`Resumen demo: ${tips.length} tips y ${parlays.length} parlays separados.`);
   } finally {
     setLoading(false);
   }
