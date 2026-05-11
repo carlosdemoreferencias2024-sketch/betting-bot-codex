@@ -51,6 +51,8 @@ const dataSourceLabels = {
   thesportsdb: "TheSportsDB",
   mlb: "MLB Stats API",
   demo: "Demo local",
+  cache: "Cache local",
+  soccer_total: "Futbol total",
   oddsapi: "The Odds API",
   sxbet: "SX Bet",
   balldontlie: "balldontlie",
@@ -383,6 +385,7 @@ const watchlistKey = "sportsBotWatchlist:v1";
 const ticketStorageKey = "sportsBotTicket:v1";
 const telegramAutoTopStateKey = "sportsBotTelegramAutoTop:v1";
 const topCacheStorageKey = "sportsBotTopCache:v1";
+const sourcePackageCacheKey = "sportsBotSourcePackageCache:v1";
 const statsSnapshotKey = "sportsBotStatsSnapshot:v1";
 const telegramSentHistoryKey = "sportsBotTelegramSentHistory:v1";
 const betModeHistoryKey = "sportsBotBetModeHistory:v1";
@@ -741,6 +744,41 @@ function loadTopCache() {
 function saveTopCache(cache) {
   localStorage.setItem(topCacheStorageKey, JSON.stringify(cache));
   postBackend("/api/storage/top-cache", { cache });
+}
+
+function loadSourcePackageCache() {
+  try {
+    return JSON.parse(localStorage.getItem(sourcePackageCacheKey)) || {};
+  } catch (error) {
+    return {};
+  }
+}
+
+function sourcePackageCacheLookupKey({ sport, leagueId, apiChoice }) {
+  return [sport || "", leagueId || "", apiChoice || "auto", isoToday()].join("|");
+}
+
+function saveSourcePackageEntry(cacheKey, pkg) {
+  if (!cacheKey || !pkg?.games?.length) return;
+  const cache = loadSourcePackageCache();
+  cache[cacheKey] = {
+    savedAt: new Date().toISOString(),
+    package: pkg,
+  };
+  const orderedEntries = Object.entries(cache)
+    .sort((a, b) => String(b[1]?.savedAt || "").localeCompare(String(a[1]?.savedAt || "")))
+    .slice(0, 24);
+  localStorage.setItem(sourcePackageCacheKey, JSON.stringify(Object.fromEntries(orderedEntries)));
+}
+
+function loadSourcePackageEntry(cacheKey, maxAgeMs = 1000 * 60 * 90) {
+  if (!cacheKey) return null;
+  const cache = loadSourcePackageCache();
+  const entry = cache[cacheKey];
+  if (!entry?.package) return null;
+  const ageMs = Date.now() - new Date(entry.savedAt || 0).getTime();
+  if (!Number.isFinite(ageMs) || ageMs < 0 || ageMs > maxAgeMs) return null;
+  return entry.package;
 }
 
 function loadStatsSnapshot() {
@@ -7148,13 +7186,14 @@ async function loadDataPackage() {
     const standings = Object.assign({}, ...merged.map((entry) => entry.externalRef?.standings || {}));
     const injuries = Object.assign({}, ...merged.map((entry) => entry.externalRef?.injuries || {}));
     const loadedLeagueCount = merged.filter((entry) => (entry.games || []).length).length;
+    log(`Futbol total: ${games.length} partido(s) reunidos desde ${loadedLeagueCount} liga(s) con fallback por liga.`);
 
     return {
       games,
       recentGames,
       formBook: buildFormBook(recentGames, sport),
       scheduleContext: buildScheduleContext(games, recentGames),
-      source: "backend",
+      source: "soccer_total",
       leagueId,
       leagueName: leagueMeta?.name || "Futbol total",
       oddsEvents,
@@ -7883,7 +7922,26 @@ async function run() {
   try {
     const sport = els.sport.value;
     const apiChoice = els.api.value || "auto";
-    const dataPackage = await loadDataPackage();
+    const cacheKey = sourcePackageCacheLookupKey({ sport, leagueId: els.league.value, apiChoice });
+    let dataPackage = await loadDataPackage();
+    const cachedPackage = loadSourcePackageEntry(cacheKey);
+    if ((!dataPackage.games?.length || dataPackage.source === "demo") && cachedPackage?.games?.length) {
+      log(`Cache local: usando ultimo paquete valido para ${selectedLeagueMeta()?.name || sportProfiles[sport]?.apiName || sport} porque la fuente activa cayo a ${dataPackage.source || "vacio"}.`);
+      dataPackage = {
+        ...cachedPackage,
+        source: cachedPackage.source || "cache",
+        health: {
+          ...(cachedPackage.health || {}),
+          source: {
+            state: "warn",
+            detail: `Cache local activa · origen previo ${dataSourceLabels[cachedPackage.source] || cachedPackage.source || "desconocido"}`,
+          },
+        },
+      };
+    } else if (dataPackage.games?.length && dataPackage.source !== "demo") {
+      saveSourcePackageEntry(cacheKey, dataPackage);
+    }
+    log(`Fuente ganadora: ${dataSourceLabels[dataPackage.source] || dataPackage.source || "desconocida"} · ${dataPackage.games?.length || 0} partido(s).`);
     const normalizedGames = dataPackage.games.length ? dataPackage.games : demoGames[els.sport.value];
     const targetSlateDate = selectTargetSlateDate(normalizedGames);
     currentCalendarDate = targetSlateDate;
@@ -7998,6 +8056,119 @@ async function run() {
   } catch (error) {
     const games = demoGames[els.sport.value];
     const sport = els.sport.value;
+    const apiChoice = els.api.value || "auto";
+    const cacheKey = sourcePackageCacheLookupKey({ sport, leagueId: els.league.value, apiChoice });
+    const cachedPackage = loadSourcePackageEntry(cacheKey);
+    if (cachedPackage?.games?.length) {
+      log(`Cache local: recuperando ultimo paquete valido tras error duro. Detalle original: ${error.message}`);
+      try {
+        const dataPackage = {
+          ...cachedPackage,
+          source: cachedPackage.source || "cache",
+          health: {
+            ...(cachedPackage.health || {}),
+            source: {
+              state: "warn",
+              detail: `Cache local activa tras error · origen previo ${dataSourceLabels[cachedPackage.source] || cachedPackage.source || "desconocido"}`,
+            },
+          },
+        };
+        const targetSlateDate = selectTargetSlateDate(dataPackage.games || []);
+        currentCalendarDate = targetSlateDate;
+        const slateGames = slateGamesForDate(dataPackage.games || [], targetSlateDate);
+        currentSlateGames = dataPackage.games || [];
+        currentOddsBook = dataPackage.oddsEvents || [];
+
+        const settings = {
+          risk: els.risk.value,
+          minConfidence: els.minConfidence.value,
+          confidenceMode: els.confidenceMode?.value || "auto",
+          autoConfidence: (els.confidenceMode?.value || "auto") !== "manual",
+          valueOnly: els.valueOnly.checked,
+          realOnly: els.realOnly.checked,
+          evStrongOnly: els.evStrongOnly?.checked,
+        };
+        const displayTip = (tip) => hydrateTipForDisplay(tip, dataPackage.validationGames, dataPackage);
+        const baseRawTips = Array.isArray(dataPackage.backendTips) && dataPackage.backendTips.length
+          ? dataPackage.backendTips
+          : slateGames.flatMap((game) => createTips(game, settings, dataPackage));
+        const baseFallbackTips = Array.isArray(dataPackage.backendTips) && dataPackage.backendTips.length
+          ? dataPackage.backendTips
+          : slateGames.flatMap((game) => createTips(game, { ...settings, minConfidence: 48, valueOnly: false }, dataPackage));
+        const baseMixedFallbackTips = Array.isArray(dataPackage.backendTips) && dataPackage.backendTips.length
+          ? dataPackage.backendTips
+          : slateGames.flatMap((game) => createTips(game, { ...settings, minConfidence: 45, valueOnly: false, realOnly: false }, dataPackage));
+        const seenRawValueKeys = new Set();
+        const seenFallbackValueKeys = new Set();
+        const preValidatedTips = baseRawTips
+          .filter((tip) => !settings.valueOnly || tip.confidence >= 58)
+          .filter((tip) => !settings.realOnly || isRealTip(tip))
+          .map(displayTip);
+        const confidencePackage = effectiveMinConfidence(preValidatedTips);
+        syncConfidenceControls(confidencePackage);
+        const rawTips = preValidatedTips
+          .filter((tip) => tip.confidence >= Number(confidencePackage.threshold || settings.minConfidence));
+        window.__lastSlateCandidates = rawTips;
+        const mixedFallbackTips = baseMixedFallbackTips.map(displayTip);
+        const fallbackTips = baseFallbackTips
+          .filter((tip) => !settings.realOnly || isRealTip(tip))
+          .map(displayTip)
+          .filter((tip) => tip.confidence >= Math.max(48, Number(confidencePackage.threshold || settings.minConfidence) - 3));
+        const rejectReasons = {};
+        const rawEvaluated = rawTips.map((tip) => ({ tip, verdict: passesValueFilters(tip, seenRawValueKeys, { strongOnly: settings.evStrongOnly }) }));
+        const fallbackEvaluated = fallbackTips.map((tip) => ({ tip, verdict: passesValueFilters(tip, seenFallbackValueKeys, { strongOnly: settings.evStrongOnly }) }));
+        rawEvaluated.forEach(({ verdict }) => bumpRejectReasons(rejectReasons, verdict));
+        fallbackEvaluated.forEach(({ verdict }) => bumpRejectReasons(rejectReasons, verdict));
+        const passedRawTips = rawEvaluated.filter(({ verdict }) => verdict.ok).map(({ tip }) => tip);
+        const passedFallbackTips = fallbackEvaluated.filter(({ verdict }) => verdict.ok).map(({ tip }) => tip);
+        const tips = rescueTipsIfEmpty(ensureSafePicks(passedRawTips, passedFallbackTips), settings.realOnly ? mixedFallbackTips : fallbackTips);
+        window.__lastRenderedTips = tips;
+        cacheRealTopTips(tips, dataPackage);
+        const oddsAlerts = buildOddsAlerts(tips);
+        currentTrackingItems = {};
+        setDashboardView("picks");
+        renderTips(tips);
+        renderTopPicks(tips);
+        renderRealTopPicks(tips);
+        syncShareCardFromTips(tips);
+        renderOddsAlerts(oddsAlerts);
+        renderValidationSummary(tips);
+        renderConsensusFinal(tips);
+        renderMarketExplorer(tips);
+        renderCalendar(tips, dataPackage.games || []);
+        renderDailyOpsPanel(tips, dataPackage.games || []);
+        renderSportBreakdown();
+        renderHistory();
+        renderStatsSnapshot();
+        renderTelegramSentHistory();
+        renderBetModeHistory();
+        renderPaperTrades();
+        renderBacktest();
+        renderShareImagePreview();
+        renderWatchlist();
+        renderFeedHealth({
+          sourceState: "warn",
+          sourceDetail: `Cache local activa tras error duro (${error.message})`,
+          oddsState: dataPackage.health?.odds?.state || "warn",
+          oddsDetail: dataPackage.health?.odds?.detail || "Cache local",
+          externalState: dataPackage.health?.external?.state || "warn",
+          externalDetail: dataPackage.health?.external?.detail || "Cache local",
+          propsState: dataPackage.health?.props?.state || "idle",
+          propsDetail: dataPackage.health?.props?.detail || "Cache local",
+          updatedAt: dataPackage.updatedAt || new Date().toLocaleString("es-MX"),
+        });
+        renderEvRejectReasons(rejectReasons, { strongOnly: Boolean(settings.evStrongOnly), valid: passedRawTips.length, rejected: rawTips.length - passedRawTips.length });
+        await bootstrapBackendTelemetry();
+        renderBackendActivity();
+        const parlays = await safelyBuildAndRenderParlays({ sport, apiChoice, tips, rawTips, fallbackTips, mixedFallbackTips, settings });
+        els.source.textContent = "Cache local";
+        log(`Motor cache: ${rawTips.length} candidato(s), ${passedRawTips.length} valido(s) por EV, ${tips.length} pick(s) renderizado(s).`);
+        log(`Listo desde cache local: slate ${targetSlateDate} con ${slateGames.length} partido(s), ${tips.length} tips y ${parlays.length} parlays.`);
+        return;
+      } catch (cacheError) {
+        log(`Cache local no pudo rescatar esta corrida. Detalle: ${cacheError.message}`);
+      }
+    }
     const targetSlateDate = selectTargetSlateDate(games);
     currentCalendarDate = targetSlateDate;
     const slateGames = slateGamesForDate(games, targetSlateDate);
