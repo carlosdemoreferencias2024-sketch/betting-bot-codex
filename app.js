@@ -405,6 +405,12 @@ let lotteryParlayUniverseCache = { at: 0, cacheKey: "", tips: [] };
 let currentMarketEventId = "";
 let currentMarketFamily = "main";
 const workMode = new URLSearchParams(window.location.search).get("workmode") === "1";
+const ALL_SOCCER_LEAGUES_ID = "__all_soccer__";
+const ALL_SOCCER_LEAGUES_META = {
+  id: ALL_SOCCER_LEAGUES_ID,
+  name: "Todas las ligas de futbol",
+  api: "backend",
+};
 
 function configValue(...keys) {
   for (const key of keys) {
@@ -418,7 +424,10 @@ function configValue(...keys) {
 
 function fillLeagues() {
   const items = leagues[els.sport.value];
-  els.league.innerHTML = items.map((league) => `<option value="${league.id}">${league.name}</option>`).join("");
+  const options = els.sport.value === "soccer"
+    ? [ALL_SOCCER_LEAGUES_META, ...items]
+    : items;
+  els.league.innerHTML = options.map((league) => `<option value="${league.id}">${league.name}</option>`).join("");
   els.api.value = workMode ? "backend" : "auto";
   syncUefaTabs();
 }
@@ -888,7 +897,7 @@ function selectedSoccerParlayScope() {
 async function loadSoccerParlayUniverse(apiChoice = "auto") {
   const cacheTtlMs = 1000 * 60 * 8;
   const scope = selectedSoccerParlayScope();
-  if (scope === "current") return [];
+  if (scope === "current" && !isAllSoccerSelection()) return [];
   const cacheKey = `${apiChoice}|${scope}`;
   if (
     soccerParlayUniverseCache.tips.length &&
@@ -917,6 +926,16 @@ async function loadSoccerParlayUniverse(apiChoice = "auto") {
     tips,
   };
   return tips;
+}
+
+async function loadExpandedSoccerParlayUniverse(apiChoice = "auto") {
+  const previousScope = els.soccerParlayScope?.value || "all";
+  if (els.soccerParlayScope) els.soccerParlayScope.value = "all";
+  try {
+    return await loadSoccerParlayUniverse(apiChoice);
+  } finally {
+    if (els.soccerParlayScope) els.soccerParlayScope.value = previousScope;
+  }
 }
 
 function extractUniverseTipsFromBackendPackage(backendPackage, league) {
@@ -957,7 +976,9 @@ async function loadLotteryParlayUniverse(apiChoice = "auto") {
   }
 
   const soccerUniverseLeagues = scope === "current"
-    ? (leagues.soccer || []).filter((league) => league.id === els.league.value)
+    ? (isAllSoccerSelection()
+        ? (leagues.soccer || [])
+        : (leagues.soccer || []).filter((league) => league.id === els.league.value))
     : (leagues.soccer || []);
   const hybridLeagueList = [
     ...soccerUniverseLeagues,
@@ -3112,6 +3133,7 @@ function renderCalendar(tips, slateGames = currentSlateGames) {
   const targetDate = currentCalendarDate || isoToday();
   els.calendarDate.value = targetDate;
   renderCalendarDateChips(slateGames);
+  const leagueGamesForDate = (slateGames || []).filter((game) => game?.date === targetDate);
   const fallbackGames = [...new Map(
     (tips || [])
       .filter((tip) => tip?.game?.date === targetDate)
@@ -3122,9 +3144,12 @@ function renderCalendar(tips, slateGames = currentSlateGames) {
   const bestTips = visibleGames.map((game) => bestTipForSlateGame(tips, game)).filter(Boolean);
   const avgConfidence = bestTips.length ? bestTips.reduce((sum, tip) => sum + tip.confidence, 0) / bestTips.length : 0;
   const noBetCount = Math.max(visibleGames.length - bestTips.length, 0);
+  const leagueDateDetail = visibleGames.length ? ` Â· liga seleccionada: ${leagueGamesForDate.length}` : "";
   els.calendarSummary.textContent = visibleGames.length
     ? `${visibleGames.length} partido(s) ${slateResolution.expanded ? "en vista ampliada" : `para ${targetDate}`} · ${bestTips.length} con pick recomendado · ${noBetCount} no bet · confianza media ${toPercent(avgConfidence)}`
     : `No hay partidos cargados para ${targetDate}.`;
+
+  els.calendarSummary.textContent += leagueDateDetail;
 
   if (!visibleGames.length) {
     els.calendarPicks.innerHTML = `<div class="empty">No hay partidos cargados para esa fecha.</div>`;
@@ -3350,7 +3375,14 @@ function stableId(text) {
 }
 
 function selectedLeagueMeta() {
+  if (els.sport.value === "soccer" && els.league.value === ALL_SOCCER_LEAGUES_ID) {
+    return ALL_SOCCER_LEAGUES_META;
+  }
   return (leagues[els.sport.value] || []).find((league) => league.id === els.league.value) || null;
+}
+
+function isAllSoccerSelection() {
+  return els.sport.value === "soccer" && els.league.value === ALL_SOCCER_LEAGUES_ID;
 }
 
 function applyWorkModeDefaults() {
@@ -5755,7 +5787,12 @@ function createTips(game, settings, context = {}) {
 
   return tips
     .filter((tip) => !tip.analysisOnly)
-    .map((tip) => createOdds({ ...tip, game, leagueId: context.leagueId || "", leagueName: context.leagueName || "" }));
+    .map((tip) => createOdds({
+      ...tip,
+      game,
+      leagueId: game.leagueId || context.leagueId || "",
+      leagueName: game.leagueName || context.leagueName || "",
+    }));
 }
 
 function normalizeSportsDbEvent(event, sport, source = "thesportsdb") {
@@ -7028,6 +7065,69 @@ async function loadDataPackage() {
     props: { state: "idle", detail: "Sin intentar" },
   };
 
+  if (isAllSoccerSelection()) {
+    log("Futbol total activo. Juntando ligas de futbol via backend concentrador.");
+    const packages = await Promise.allSettled(
+      (leagues.soccer || []).map(async (league) => {
+        const backendPackage = await fetchBackendPicksPackage("soccer", league.id);
+        const annotate = (game) => ({
+          ...game,
+          leagueId: game?.leagueId || league.id,
+          leagueName: game?.leagueName || league.name,
+        });
+        return {
+          league,
+          games: (backendPackage.games || []).map(annotate),
+          recentGames: (backendPackage.recentGames || []).map(annotate),
+          oddsEvents: backendPackage.oddsEvents || [],
+          validationGames: (backendPackage.validationGames || []).map(annotate),
+          externalRef: backendPackage.externalRef || { source: "backend", standings: {}, injuries: {} },
+          tips: (backendPackage.tips || []).map((tip) => ({
+            ...tip,
+            leagueId: tip?.leagueId || league.id,
+            leagueName: tip?.leagueName || league.name,
+            game: annotate(tip?.game || {}),
+          })),
+        };
+      })
+    );
+
+    const merged = packages
+      .filter((entry) => entry.status === "fulfilled")
+      .map((entry) => entry.value);
+    const games = merged.flatMap((entry) => entry.games || []);
+    const recentGames = merged.flatMap((entry) => entry.recentGames || []);
+    const oddsEvents = merged.flatMap((entry) => entry.oddsEvents || []);
+    const validationGames = merged.flatMap((entry) => entry.validationGames || []);
+    const backendTips = merged.flatMap((entry) => entry.tips || []);
+    const standings = Object.assign({}, ...merged.map((entry) => entry.externalRef?.standings || {}));
+    const injuries = Object.assign({}, ...merged.map((entry) => entry.externalRef?.injuries || {}));
+    const loadedLeagueCount = merged.filter((entry) => (entry.games || []).length).length;
+
+    return {
+      games,
+      recentGames,
+      formBook: buildFormBook(recentGames, sport),
+      scheduleContext: buildScheduleContext(games, recentGames),
+      source: "backend",
+      leagueId,
+      leagueName: leagueMeta?.name || "Futbol total",
+      oddsEvents,
+      validationGames,
+      validationSource: "backend",
+      externalRef: { source: "backend", standings, injuries },
+      health: {
+        source: { state: games.length ? "ok" : "warn", detail: `Futbol total · ${games.length} partido(s) desde ${loadedLeagueCount} liga(s)` },
+        recent: { state: recentGames.length ? "ok" : "warn", detail: `${recentGames.length} resultado(s) recientes cargados` },
+        odds: { state: oddsEvents.length ? "ok" : "warn", detail: oddsEvents.length ? `Odds concentradas · ${oddsEvents.length} evento(s)` : "Sin odds reales concentradas" },
+        external: { state: Object.keys(standings).length || Object.keys(injuries).length ? "ok" : "warn", detail: "Referencias cruzadas por liga" },
+        props: { state: "idle", detail: "No aplica para futbol total" },
+      },
+      updatedAt: new Date().toLocaleString("es-MX"),
+      backendTips,
+    };
+  }
+
   log("Consultando API interna del bot y fuentes gratuitas.");
   const upcoming = await sportsDataApi.getUpcomingGames({ sport, leagueId, apiChoice });
   if (apiChoice === "backend" && upcoming.backendPackage) {
@@ -7600,9 +7700,10 @@ function renderParlays(parlays) {
         <div>
           <span>Prob. est.</span>
           <strong>${toPercent(parlay.hitRate)}</strong>
-        </div>
+      </div>
       </div>
       <p class="parlay-note">${parlay.note}</p>
+      <p class="parlay-note subtle">${parlay.scopeResolution || "Construido con liga actual"}</p>
       <p class="parlay-note subtle">Piernas disponibles antes del corte: ${parlay.availableLegs || parlay.legs.length}.</p>
       ${composition}
       ${sportMix}
@@ -7678,16 +7779,42 @@ async function safelyBuildAndRenderParlays({
   settings,
 }) {
   try {
-    const soccerParlayUniverse = sport === "soccer" ? await loadSoccerParlayUniverse(apiChoice) : [];
+    let soccerParlayUniverse = sport === "soccer" ? await loadSoccerParlayUniverse(apiChoice) : [];
     const lotteryParlayUniverse = ["soccer", "mlb"].includes(sport) ? await loadLotteryParlayUniverse(apiChoice) : [];
-    const parlayCandidates = [
+    let parlayCandidates = [
       ...(rawTips || []),
       ...(fallbackTips || []),
       ...((settings?.realOnly ? mixedFallbackTips : []) || []),
       ...soccerParlayUniverse,
       ...lotteryParlayUniverse,
     ];
-    const parlays = buildSlateParlays(tips, parlayCandidates);
+    let parlays = buildSlateParlays(tips, parlayCandidates);
+    const noSoccerParlay = sport === "soccer" && !parlays.some((parlay) => parlay.legs.length >= 2);
+    if (noSoccerParlay && selectedSoccerParlayScope() === "current") {
+      const expandedSoccerUniverse = await loadExpandedSoccerParlayUniverse(apiChoice);
+      soccerParlayUniverse = expandedSoccerUniverse;
+      parlayCandidates = [
+        ...(rawTips || []),
+        ...(fallbackTips || []),
+        ...((settings?.realOnly ? mixedFallbackTips : []) || []),
+        ...expandedSoccerUniverse,
+        ...lotteryParlayUniverse,
+      ];
+      parlays = buildSlateParlays(tips, parlayCandidates).map((parlay) => ({
+        ...parlay,
+        badges: [...new Set([...(parlay.badges || []), "Universo ampliado"])],
+        scopeResolution: "Construido con universo ampliado",
+      }));
+      if (expandedSoccerUniverse.length) {
+        log(`Parlays futbol: la liga actual no alcanzaba; se amplio el universo con ${expandedSoccerUniverse.length} candidato(s) de otras ligas.`);
+      }
+    }
+    parlays = parlays.map((parlay) => ({
+      ...parlay,
+      scopeResolution: parlay.scopeResolution || (selectedSoccerParlayScope() === "current"
+        ? "Construido con liga actual"
+        : "Construido con todas las ligas"),
+    }));
     renderParlays(parlays);
     if (sport === "soccer" && soccerParlayUniverse.length) {
       log(`Parlays futbol: universo ampliado con ${soccerParlayUniverse.length} candidato(s) de ligas adicionales.`);
