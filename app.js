@@ -1,4 +1,4 @@
-const leagues = {
+﻿const leagues = {
   soccer: [
     { id: "4328", name: "Premier League", api: "thesportsdb" },
     { id: "4480", name: "UEFA Champions League", api: "thesportsdb" },
@@ -234,6 +234,10 @@ const els = {
   evStrongOnly: document.querySelector("#evStrongOnlyToggle"),
   soccerParlayScope: document.querySelector("#soccerParlayScopeSelect"),
   soccerTopThree: document.querySelector("#soccerTopThreeToggle"),
+  soccerMarketToolbar: document.querySelector("#soccerMarketToolbar"),
+  soccerViewMode: document.querySelector("#soccerViewModeSelect"),
+  soccerMarketRole: document.querySelector("#soccerMarketRoleSelect"),
+  soccerMarketThreshold: document.querySelector("#soccerMarketThresholdInput"),
   bankroll: document.querySelector("#bankrollInput"),
   stakeProfile: document.querySelector("#stakeProfileSelect"),
   betMode: document.querySelector("#betModeSelect"),
@@ -298,6 +302,12 @@ const els = {
   calendarPicks: document.querySelector("#calendarPicksList"),
   log: document.querySelector("#logPanel"),
   source: document.querySelector("#sourceBadge"),
+  picksOverviewSource: document.querySelector("#picksOverviewSource"),
+  picksOverviewSourceDetail: document.querySelector("#picksOverviewSourceDetail"),
+  picksOverviewLeague: document.querySelector("#picksOverviewLeague"),
+  picksOverviewLeagueDetail: document.querySelector("#picksOverviewLeagueDetail"),
+  picksOverviewState: document.querySelector("#picksOverviewState"),
+  picksOverviewStateDetail: document.querySelector("#picksOverviewStateDetail"),
   feedHealthBadge: document.querySelector("#feedHealthBadge"),
   telegramAutoTopToggle: document.querySelector("#telegramAutoTopToggle"),
   gamesCount: document.querySelector("#gamesCount"),
@@ -386,6 +396,7 @@ const ticketStorageKey = "sportsBotTicket:v1";
 const telegramAutoTopStateKey = "sportsBotTelegramAutoTop:v1";
 const topCacheStorageKey = "sportsBotTopCache:v1";
 const sourcePackageCacheKey = "sportsBotSourcePackageCache:v1";
+const layerPackageCacheKey = "sportsBotLayerPackageCache:v1";
 const statsSnapshotKey = "sportsBotStatsSnapshot:v1";
 const telegramSentHistoryKey = "sportsBotTelegramSentHistory:v1";
 const betModeHistoryKey = "sportsBotBetModeHistory:v1";
@@ -779,6 +790,59 @@ function loadSourcePackageEntry(cacheKey, maxAgeMs = 1000 * 60 * 90) {
   const ageMs = Date.now() - new Date(entry.savedAt || 0).getTime();
   if (!Number.isFinite(ageMs) || ageMs < 0 || ageMs > maxAgeMs) return null;
   return entry.package;
+}
+
+function loadLayerPackageCache() {
+  try {
+    return JSON.parse(localStorage.getItem(layerPackageCacheKey)) || {};
+  } catch (error) {
+    return {};
+  }
+}
+
+function layerCacheLookupKey({ layer, sport, leagueId, date = isoToday() }) {
+  return [layer || "layer", sport || "", leagueId || "", date].join("|");
+}
+
+function layerCacheMaxAgeMs(layer) {
+  if (layer === "odds") return 1000 * 60 * 20;
+  if (layer === "external") return 1000 * 60 * 60 * 8;
+  return 1000 * 60 * 60 * 3;
+}
+
+function layerPayloadHasData(layer, payload = {}) {
+  if (layer === "fixtures") return Array.isArray(payload.games) && payload.games.length > 0;
+  if (layer === "odds") return Array.isArray(payload.oddsEvents) && payload.oddsEvents.length > 0;
+  if (layer === "external") {
+    const standings = Object.keys(payload.externalRef?.standings || {}).length;
+    const injuries = Object.keys(payload.externalRef?.injuries || {}).length;
+    return standings > 0 || injuries > 0 || payload.externalRef?.source === "oddsapi";
+  }
+  return false;
+}
+
+function saveLayerCacheEntry(layer, cacheKey, payload) {
+  if (!cacheKey || !layerPayloadHasData(layer, payload)) return;
+  const cache = loadLayerPackageCache();
+  cache[cacheKey] = {
+    savedAt: new Date().toISOString(),
+    layer,
+    payload,
+  };
+  const orderedEntries = Object.entries(cache)
+    .sort((a, b) => String(b[1]?.savedAt || "").localeCompare(String(a[1]?.savedAt || "")))
+    .slice(0, 96);
+  localStorage.setItem(layerPackageCacheKey, JSON.stringify(Object.fromEntries(orderedEntries)));
+}
+
+function loadLayerCacheEntry(layer, cacheKey, maxAgeMs = layerCacheMaxAgeMs(layer)) {
+  if (!cacheKey) return null;
+  const cache = loadLayerPackageCache();
+  const entry = cache[cacheKey];
+  if (!entry?.payload) return null;
+  const ageMs = Date.now() - new Date(entry.savedAt || 0).getTime();
+  if (!Number.isFinite(ageMs) || ageMs < 0 || ageMs > maxAgeMs) return null;
+  return entry.payload;
 }
 
 function loadStatsSnapshot() {
@@ -1962,8 +2026,8 @@ function renderExecutiveDashboard(tips = []) {
     `;
     els.executiveHeroCard.innerHTML = els.executiveHeroCard.innerHTML
       .replace(pickRealityMeta(top).detail, pickRealityMeta(top).label)
-      .replaceAll(" Â· ", " | ");
-    els.executiveTopPick.innerHTML = els.executiveTopPick.innerHTML.replaceAll(" Â· ", " | ");
+      .replaceAll(" · ", " | ");
+    els.executiveTopPick.innerHTML = els.executiveTopPick.innerHTML.replaceAll(" · ", " | ");
   }
 
   els.executiveSlateState.innerHTML = `
@@ -1981,9 +2045,9 @@ function renderExecutiveDashboard(tips = []) {
     </article>
   `;
   els.executiveSlateState.innerHTML = els.executiveSlateState.innerHTML
-    .replace(`${slateTips.length} pick(s) del slate Â· ${realSlateTips.length} reales.`, `${slateTips.length} pick(s) | ${realSlateTips.length} reales | ${Number(els.evValidCount?.textContent || 0)} validos por EV.`)
+    .replace(`${slateTips.length} pick(s) del slate · ${realSlateTips.length} reales.`, `${slateTips.length} pick(s) | ${realSlateTips.length} reales | ${Number(els.evValidCount?.textContent || 0)} validos por EV.`)
     .replace(els.evStrongOnly?.checked ? "Filtro EV fuerte activo." : "Filtro EV normal activo.", els.evStrongOnly?.checked ? "Filtro EV fuerte" : "Filtro EV normal")
-    .replace(`Confianza ${confidencePackage.automatic ? "automatica" : "manual"} Â· corte ${confidencePackage.threshold}%.`, `Confianza ${confidencePackage.automatic ? "auto" : "manual"} ${confidencePackage.threshold}%.`)
+    .replace(`Confianza ${confidencePackage.automatic ? "automatica" : "manual"} · corte ${confidencePackage.threshold}%.`, `Confianza ${confidencePackage.automatic ? "auto" : "manual"} ${confidencePackage.threshold}%.`)
     .replace(`${Number(els.evRejectedCount?.textContent || 0)} pick(s) rechazados por filtro.`, `${Number(els.evRejectedCount?.textContent || 0)} pick(s) fuera por filtro.`);
 
   els.executiveBankrollState.innerHTML = `
@@ -2523,7 +2587,7 @@ function renderMarketExplorer(tips = []) {
       </div>
     </article>
   `;
-  els.marketExplorerMeta.innerHTML = els.marketExplorerMeta.innerHTML.replaceAll(" Â· ", " | ");
+  els.marketExplorerMeta.innerHTML = els.marketExplorerMeta.innerHTML.replaceAll(" · ", " | ");
 
   if (!activeFamily.items.length) {
     els.marketExplorer.innerHTML = `<div class="empty">Todavia no hay picks del tipo ${activeFamily.label} para este partido.</div>`;
@@ -2609,7 +2673,7 @@ function renderMarketExplorer(tips = []) {
       `;
     })
     .join("");
-  els.marketExplorer.innerHTML = els.marketExplorer.innerHTML.replaceAll(" Â· ", " | ");
+  els.marketExplorer.innerHTML = els.marketExplorer.innerHTML.replaceAll(" · ", " | ");
 }
 
 function buildUnifiedAlerts(tips = [], alertPackage = { alerts: [] }) {
@@ -3092,25 +3156,37 @@ function renderOpenBotHelp() {
 }
 
 function renderFeedHealth(status = {}) {
+  const modeLabel = (mode, state) => {
+    if (mode === "live") return "Live";
+    if (mode === "cache") return "Cache";
+    if (mode === "fallback") return "Fallback";
+    if (state === "ok") return "OK";
+    if (state === "warn") return "Alerta";
+    return "Base";
+  };
   const items = [
     {
-      label: "Fuente principal",
+      label: "Fixtures",
       state: status.sourceState || "idle",
+      mode: status.sourceMode || "idle",
       detail: status.sourceDetail || "Esperando carga",
     },
     {
-      label: "Odds reales",
+      label: "Odds",
       state: status.oddsState || "idle",
+      mode: status.oddsMode || "idle",
       detail: status.oddsDetail || "Sin verificar",
     },
     {
-      label: "Referencias externas",
+      label: "External",
       state: status.externalState || "idle",
+      mode: status.externalMode || "idle",
       detail: status.externalDetail || "Sin verificar",
     },
     {
-      label: "Feed de props",
+      label: "Props",
       state: status.propsState || "idle",
+      mode: status.propsMode || "idle",
       detail: status.propsDetail || "Sin verificar",
     },
     {
@@ -3133,11 +3209,60 @@ function renderFeedHealth(status = {}) {
     <article class="alert-card ${item.state === "warn" ? "down" : item.state === "ok" ? "up" : ""}">
       <div class="alert-top">
         <strong>${item.label}</strong>
-        <span>${item.state === "ok" ? "OK" : item.state === "warn" ? "Alerta" : "Base"}</span>
+        <span>${modeLabel(item.mode, item.state)}</span>
       </div>
       <div class="alert-meta">${item.detail}</div>
     </article>
   `).join("");
+}
+
+function renderPicksOverviewStatus({ leagueName, targetDate, slateGames = [], tips = [], health = {}, source = "" }) {
+  const flatSoccerView = els.sport.value === "soccer" && soccerViewMode() === "flat";
+  const layerSourceSummary = [
+    `Fixtures ${String(health.source?.mode || "idle").toUpperCase()}${health.source?.winner ? ` · ${dataSourceLabels[health.source.winner] || health.source.winner}` : ""}`,
+    `Odds ${String(health.odds?.mode || "idle").toUpperCase()}${health.odds?.winner ? ` · ${dataSourceLabels[health.odds.winner] || health.odds.winner}` : ""}`,
+    `External ${String(health.external?.mode || "idle").toUpperCase()}${health.external?.winner ? ` · ${dataSourceLabels[health.external.winner] || health.external.winner}` : ""}`,
+  ].join(" | ");
+  if (els.picksOverviewSource) {
+    const fixturesMode = String(health.source?.mode || "idle").toUpperCase();
+    els.picksOverviewSource.textContent = `Fixtures ${fixturesMode}`;
+  }
+  if (els.picksOverviewSourceDetail) {
+    els.picksOverviewSourceDetail.textContent = layerSourceSummary || (dataSourceLabels[source] || source || "Sin fuente");
+  }
+  if (els.picksOverviewLeague) {
+    els.picksOverviewLeague.textContent = leagueName || "Sin liga";
+  }
+  if (els.picksOverviewLeagueDetail) {
+    els.picksOverviewLeagueDetail.textContent = `${slateGames.length} partido(s) del slate ${targetDate || isoToday()}`;
+  }
+  if (flatSoccerView) return;
+  if (els.picksOverviewState) {
+    els.picksOverviewState.textContent = tips.length ? `${tips.length} picks` : "Sin picks";
+  }
+  if (els.picksOverviewStateDetail) {
+    const realCount = tips.filter((tip) => isRealTip(tip)).length;
+    const mixedCount = tips.filter((tip) => !isRealTip(tip) && !isEstimatedTip(tip)).length;
+    const estimatedCount = Math.max(tips.length - realCount - mixedCount, 0);
+    els.picksOverviewStateDetail.textContent = `Real ${realCount} · Mixto ${mixedCount} · Estimado ${estimatedCount}`;
+  }
+}
+
+function buildLayerSummaryText(health = {}) {
+  const pieces = [
+    { label: "Fixtures", layer: health.source },
+    { label: "Odds", layer: health.odds },
+    { label: "External", layer: health.external },
+  ];
+  return pieces.map(({ label, layer }) => {
+    const mode = String(layer?.mode || "idle").toUpperCase();
+    const winner = layer?.winner ? (dataSourceLabels[layer.winner] || layer.winner) : "sin fuente";
+    return `${label}: ${mode} (${winner})`;
+  }).join(" | ");
+}
+
+function logLayerSummary(health = {}) {
+  log(`Capas: ${buildLayerSummaryText(health)}.`);
 }
 
 async function maybeAutoSendTelegramTop(tips) {
@@ -3182,7 +3307,7 @@ function renderCalendar(tips, slateGames = currentSlateGames) {
   const bestTips = visibleGames.map((game) => bestTipForSlateGame(tips, game)).filter(Boolean);
   const avgConfidence = bestTips.length ? bestTips.reduce((sum, tip) => sum + tip.confidence, 0) / bestTips.length : 0;
   const noBetCount = Math.max(visibleGames.length - bestTips.length, 0);
-  const leagueDateDetail = visibleGames.length ? ` Â· liga seleccionada: ${leagueGamesForDate.length}` : "";
+  const leagueDateDetail = visibleGames.length ? ` · liga seleccionada: ${leagueGamesForDate.length}` : "";
   els.calendarSummary.textContent = visibleGames.length
     ? `${visibleGames.length} partido(s) ${slateResolution.expanded ? "en vista ampliada" : `para ${targetDate}`} · ${bestTips.length} con pick recomendado · ${noBetCount} no bet · confianza media ${toPercent(avgConfidence)}`
     : `No hay partidos cargados para ${targetDate}.`;
@@ -3361,6 +3486,50 @@ function visibleSlateMarketTips(tips, game) {
     return ranked.slice(0, 3);
   }
   return ranked.slice(0, 5);
+}
+
+function soccerViewMode() {
+  return els.soccerViewMode?.value || "summary";
+}
+
+function soccerMarketRoleMeta(tip, rankedTips = [], index = 0) {
+  if (!tip) return { key: "value", label: "Valor" };
+  if (index === 0) return { key: "principal", label: "Principal" };
+  const type = String(tip.type || "").toLowerCase();
+  const topConfidence = Number(rankedTips[0]?.confidence || 0);
+  const coverageLike = [
+    "doble oportunidad",
+    "empate no apuesta",
+    "handicap asiatico",
+    "spread",
+  ];
+  if (coverageLike.some((entry) => type.includes(entry)) || Number(tip.confidence || 0) >= topConfidence - 3) {
+    return { key: "coverage", label: "Cobertura" };
+  }
+  return { key: "value", label: "Valor" };
+}
+
+function soccerMarketThreshold() {
+  return clamp(Number(els.soccerMarketThreshold?.value || 58), 45, 90);
+}
+
+function allValidTipsForSlate(games = [], tips = [], options = {}) {
+  const threshold = Number(options.threshold ?? soccerMarketThreshold());
+  const roleFilter = String(options.roleFilter || "all");
+  const rows = [];
+  (games || []).forEach((game) => {
+    const ranked = rankedTipsForSlateGame(tips, game);
+    const filtered = ranked
+      .map((tip, index) => ({
+        tip,
+        role: soccerMarketRoleMeta(tip, ranked, index),
+        rank: index + 1,
+      }))
+      .filter((entry) => Number(entry.tip?.confidence || 0) >= threshold)
+      .filter((entry) => roleFilter === "all" || entry.role.key === roleFilter);
+    rows.push({ game, markets: filtered });
+  });
+  return rows;
 }
 
 function recommendationActionForTip(tip) {
@@ -7090,68 +7259,432 @@ const sportsDataApi = {
   },
 };
 
+function uniqueStrings(items = []) {
+  return [...new Set((items || []).filter(Boolean))];
+}
+
+function fixturesSourceCandidates(sport, apiChoice) {
+  const base = {
+    soccer: ["sportsapipro", "backend", "thesportsdb", "therundown"],
+    mlb: ["mlb", "backend", "oddsapi"],
+    nba: ["balldontlie", "backend", "oddsapi"],
+    nfl: ["oddsapi", "backend"],
+  }[sport] || ["backend"];
+
+  if (apiChoice === "demo") return ["demo"];
+  if (!apiChoice || apiChoice === "auto") return base;
+  return uniqueStrings([apiChoice, ...base]);
+}
+
+function oddsSourceCandidates(sport, apiChoice) {
+  const base = {
+    soccer: ["sportsapipro", "therundown", "oddsapi", "backend", "sxbet"],
+    mlb: ["oddsapi", "backend", "sportsapipro", "sxbet"],
+    nba: ["oddsapi", "backend", "sportsapipro"],
+    nfl: ["oddsapi", "backend", "sportsapipro"],
+  }[sport] || ["backend"];
+
+  if (apiChoice === "demo") return ["demo"];
+  if (!apiChoice || apiChoice === "auto") return base;
+  return uniqueStrings([apiChoice, ...base]);
+}
+
+function healthModeForSource(source, requestedChoice, primarySource) {
+  if (source === "cache") return "cache";
+  if (source === "demo" || source === "estimated" || source === "empty" || source === "base") return "fallback";
+  if (requestedChoice === "backend") return "live";
+  if (!requestedChoice || requestedChoice === "auto") {
+    return source === primarySource ? "live" : "fallback";
+  }
+  return source === requestedChoice ? "live" : "fallback";
+}
+
+async function loadFixturesLayer({ sport, leagueId, apiChoice, allowDemo = true }) {
+  const cacheKey = layerCacheLookupKey({ layer: "fixtures", sport, leagueId });
+  const candidates = fixturesSourceCandidates(sport, apiChoice);
+  const failures = [];
+  const primarySource = candidates[0] || apiChoice || "auto";
+
+  for (const candidate of candidates) {
+    try {
+      const pkg = await sportsDataApi.getUpcomingGames({ sport, leagueId, apiChoice: candidate });
+      const games = sport === "mlb" ? (pkg.games || []).map(enrichMlbGameContext) : (pkg.games || []);
+      if (games.length && pkg.source !== "demo") {
+        const mode = healthModeForSource(pkg.source || candidate, apiChoice, primarySource);
+        const payload = {
+          games,
+          source: pkg.source || candidate,
+          oddsSeedEvents: pkg.oddsEvents || [],
+          backendTips: pkg.tips || [],
+          backendPackage: pkg.backendPackage || null,
+        };
+        saveLayerCacheEntry("fixtures", cacheKey, payload);
+        return {
+          ...payload,
+          mode,
+          failures,
+          detail: `${dataSourceLabels[pkg.source] || pkg.source || candidate} gano fixtures con ${games.length} partido(s).`,
+        };
+      }
+      failures.push(`${dataSourceLabels[pkg.source] || pkg.source || candidate}: sin partidos utiles`);
+    } catch (error) {
+      failures.push(`${dataSourceLabels[candidate] || candidate}: ${error.message}`);
+    }
+  }
+
+  const cached = loadLayerCacheEntry("fixtures", cacheKey);
+  if (cached?.games?.length) {
+    return {
+      ...cached,
+      source: cached.source || "cache",
+      mode: "cache",
+      failures,
+      detail: `Cache local de fixtures desde ${dataSourceLabels[cached.source] || cached.source || "fuente previa"}.`,
+    };
+  }
+
+  return {
+    games: allowDemo ? demoGames[sport] : [],
+    source: allowDemo ? "demo" : "empty",
+    oddsSeedEvents: [],
+    backendTips: [],
+    backendPackage: null,
+    mode: "fallback",
+    failures,
+    detail: allowDemo
+      ? "Sin fixtures vivos; usando demo local."
+      : "Sin fixtures vivos tras agotar live, fallback y cache.",
+  };
+}
+
+async function loadOddsLayer({ sport, leagueId, apiChoice, seedSource = "", seedOddsEvents = [] }) {
+  const cacheKey = layerCacheLookupKey({ layer: "odds", sport, leagueId });
+  const candidates = oddsSourceCandidates(sport, apiChoice);
+  const failures = [];
+  const primarySource = candidates[0] || apiChoice || "oddsapi";
+
+  if (Array.isArray(seedOddsEvents) && seedOddsEvents.length) {
+    const payload = {
+      oddsEvents: seedOddsEvents,
+      source: seedSource || primarySource,
+    };
+    saveLayerCacheEntry("odds", cacheKey, payload);
+    return {
+      ...payload,
+      mode: healthModeForSource(payload.source, apiChoice, primarySource),
+      failures,
+      detail: `${dataSourceLabels[payload.source] || payload.source} aporto ${seedOddsEvents.length} evento(s) con odds.`,
+    };
+  }
+
+  for (const candidate of candidates) {
+    try {
+      let source = candidate;
+      let oddsEvents = [];
+      if (candidate === "backend") {
+        const backendPackage = await fetchBackendPicksPackage(sport, leagueId);
+        oddsEvents = backendPackage.oddsEvents || [];
+        source = "backend";
+      } else if (candidate === "sxbet") {
+        oddsEvents = await fetchSxBetOddsEvents(sport, leagueId);
+        source = "sxbet";
+      } else {
+        const preferred = await fetchPreferredOddsEvents(sport, leagueId, candidate);
+        oddsEvents = preferred.events || [];
+        source = preferred.source || candidate;
+      }
+
+      if (oddsEvents.length) {
+        const payload = { oddsEvents, source };
+        saveLayerCacheEntry("odds", cacheKey, payload);
+        return {
+          ...payload,
+          mode: healthModeForSource(source, apiChoice, primarySource),
+          failures,
+          detail: `${dataSourceLabels[source] || source} gano odds con ${oddsEvents.length} evento(s).`,
+        };
+      }
+      failures.push(`${dataSourceLabels[source] || source}: sin odds utiles`);
+    } catch (error) {
+      failures.push(`${dataSourceLabels[candidate] || candidate}: ${error.message}`);
+    }
+  }
+
+  const cached = loadLayerCacheEntry("odds", cacheKey);
+  if (cached?.oddsEvents?.length) {
+    return {
+      ...cached,
+      source: cached.source || "cache",
+      mode: "cache",
+      failures,
+      detail: `Cache local de odds desde ${dataSourceLabels[cached.source] || cached.source || "fuente previa"}.`,
+    };
+  }
+
+  return {
+    oddsEvents: [],
+    source: "estimated",
+    mode: "fallback",
+    failures,
+    detail: "Sin odds reales; el motor queda en estimadas.",
+  };
+}
+
+async function loadExternalLayer({ sport, leagueId }) {
+  const cacheKey = layerCacheLookupKey({ layer: "external", sport, leagueId });
+  const failures = [];
+
+  try {
+    const externalRef = await fetchExternalReferencePackage(sport, leagueId);
+    const refCount = Object.keys(externalRef.standings || {}).length + Object.keys(externalRef.injuries || {}).length;
+    if (refCount || externalRef.source === "oddsapi") {
+      const payload = { externalRef, source: externalRef.source || "base" };
+      saveLayerCacheEntry("external", cacheKey, payload);
+      return {
+        ...payload,
+        mode: externalRef.source === "base" ? "fallback" : "live",
+        failures,
+        detail: refCount
+          ? `${dataSourceLabels[externalRef.source] || externalRef.source} activo con ${refCount} referencia(s).`
+          : `${dataSourceLabels[externalRef.source] || externalRef.source} activo sin extras cuantificables.`,
+      };
+    }
+    failures.push("Fuente externa sin referencias utiles");
+  } catch (error) {
+    failures.push(error.message);
+  }
+
+  const cached = loadLayerCacheEntry("external", cacheKey);
+  if (cached?.externalRef) {
+    return {
+      ...cached,
+      source: cached.source || cached.externalRef?.source || "cache",
+      mode: "cache",
+      failures,
+      detail: `Cache local de referencias desde ${dataSourceLabels[cached.source] || cached.source || "fuente previa"}.`,
+    };
+  }
+
+  return {
+    externalRef: { source: "base", standings: {}, injuries: {} },
+    source: "base",
+    mode: "fallback",
+    failures,
+    detail: "Sin referencias externas; seguimos solo con modelo base.",
+  };
+}
+
+async function loadSingleLeagueDataPackage({ sport, leagueId, apiChoice, leagueMeta, allowDemo = true }) {
+  const health = {
+    source: { state: "idle", mode: "idle", detail: "Sin intentar" },
+    recent: { state: "idle", mode: "idle", detail: "Sin intentar" },
+    odds: { state: "idle", mode: "idle", detail: "Sin intentar" },
+    external: { state: "idle", mode: "idle", detail: "Sin intentar" },
+    props: { state: "idle", mode: "idle", detail: "Sin intentar" },
+  };
+
+  const fixturesLayer = await loadFixturesLayer({ sport, leagueId, apiChoice, allowDemo });
+  health.source = {
+    state: fixturesLayer.games.length && fixturesLayer.source !== "demo" ? "ok" : "warn",
+    mode: fixturesLayer.mode,
+    winner: fixturesLayer.source,
+    detail: fixturesLayer.detail,
+  };
+  if (fixturesLayer.failures.length) {
+    log(`Fixtures ${leagueMeta?.name || sport}: ${fixturesLayer.detail}`);
+    fixturesLayer.failures.forEach((failure) => log(`Fixtures fallback: ${failure}`));
+  } else {
+    log(`Fixtures ${leagueMeta?.name || sport}: ${fixturesLayer.detail}`);
+  }
+
+  if (sport === "mlb") {
+    try {
+      const lineupDates = [...new Set((fixturesLayer.games || []).map((game) => game.date).filter(Boolean))].slice(0, 4);
+      const lineupRows = (await Promise.all(lineupDates.map((date) => fetchSportsDataIoMlbStartingLineupsByDate(date)))).flat();
+      currentMlbLineupBook = buildMlbLineupBook(lineupRows);
+    } catch (error) {
+      currentMlbLineupBook = {};
+      log(`Lineups MLB no disponibles. Seguimos sin esa capa. Detalle: ${error.message}`);
+    }
+  } else {
+    currentMlbLineupBook = {};
+  }
+
+  let recentGames = [];
+  try {
+    recentGames = await sportsDataApi.getRecentGames({ sport, leagueId, apiChoice });
+    health.recent = {
+      state: recentGames.length ? "ok" : "warn",
+      mode: recentGames.length ? "live" : "fallback",
+      winner: apiChoice || "auto",
+      detail: recentGames.length
+        ? `${recentGames.length} resultado(s) recientes cargados`
+        : "Historico sin resultados utiles",
+    };
+  } catch (error) {
+    health.recent = { state: "warn", mode: "fallback", detail: `Historico no disponible: ${error.message}` };
+  }
+
+  const oddsLayer = await loadOddsLayer({
+    sport,
+    leagueId,
+    apiChoice,
+    seedSource: fixturesLayer.source,
+    seedOddsEvents: fixturesLayer.oddsSeedEvents,
+  });
+  let oddsEvents = oddsLayer.oddsEvents || [];
+  health.odds = {
+    state: oddsEvents.length ? "ok" : "warn",
+    mode: oddsLayer.mode,
+    winner: oddsLayer.source,
+    detail: oddsLayer.detail,
+  };
+  log(`Odds ${leagueMeta?.name || sport}: ${oddsLayer.detail}`);
+  oddsLayer.failures.forEach((failure) => log(`Odds fallback: ${failure}`));
+
+  let validationPackage = { source: "demo", games: [] };
+  try {
+    validationPackage = await fetchValidationGames(sport, leagueId, apiChoice);
+  } catch (error) {
+    validationPackage = { source: "demo", games: [] };
+  }
+
+  if ((sport === "nba" || sport === "nfl") && apiChoice !== "demo") {
+    const propsMarkets = propsMarketsForSport(sport);
+    if (propsMarkets) {
+      try {
+        const propEvents = await fetchOddsApi(sport, leagueId, propsMarkets);
+        if (propEvents.length) {
+          oddsEvents = mergeOddsEvents(oddsEvents, propEvents, sport);
+          const propCount = oddsEvents.reduce((sum, event) => sum + buildPropMarketEntriesForEvent(event).length, 0);
+          if (sport === "nba") {
+            currentPropStatsBook = await buildNbaPropStatsBook(oddsEvents);
+            const nbaStatsCount = Object.keys(currentPropStatsBook || {}).length;
+            const pyEspnCount = Object.values(currentPropStatsBook || {}).filter((entry) => String(entry?.source || "").includes("pyespn")).length;
+            health.props = {
+              state: nbaStatsCount ? "ok" : "warn",
+              mode: nbaStatsCount ? "live" : "fallback",
+              winner: pyEspnCount ? "pyespn" : "balldontlie",
+              detail: nbaStatsCount
+                ? (pyEspnCount
+                  ? `PyESPN + stats NBA para ${pyEspnCount} jugador(es)`
+                  : `Stats reales NBA activas para ${nbaStatsCount} jugador(es)`)
+                : "Props NBA cargados, pero sin stats reales enlazadas",
+            };
+          } else {
+            currentPropStatsBook = await buildNflPropStatsBook(oddsEvents);
+            const nflPropEntries = Object.values(currentPropStatsBook || {});
+            const pyEspnHybridCount = nflPropEntries.filter((entry) => entry?.source === "pyespn-sportsdataio-hybrid").length;
+            const hybridCount = nflPropEntries.filter((entry) => entry?.source === "sportsdataio-hybrid").length;
+            const pyEspnOnlyCount = nflPropEntries.filter((entry) => entry?.source === "pyespn-nfl").length;
+            const projectionOnlyCount = nflPropEntries.filter((entry) => entry?.source === "sportsdataio").length;
+            const sportsDataKey = configValue("sportsdataApiKey", "sportsDataIoApiKey");
+            if (!sportsDataKey || sportsDataKey === "replace_me") {
+              health.props = {
+                state: pyEspnOnlyCount ? "ok" : "warn",
+                mode: pyEspnOnlyCount ? "live" : "fallback",
+                winner: pyEspnOnlyCount ? "pyespn" : "estimated",
+                detail: pyEspnOnlyCount
+                  ? `${pyEspnOnlyCount} jugador(es) NFL con game logs ESPN`
+                  : "SportsDataIO no configurado; NFL props sigue en consenso de books",
+              };
+            } else if (pyEspnHybridCount || hybridCount) {
+              health.props = {
+                state: "ok",
+                mode: "live",
+                winner: pyEspnHybridCount ? "pyespn" : "sportsapipro",
+                detail: `${pyEspnHybridCount || hybridCount} jugador(es) NFL con logs + proyeccion${projectionOnlyCount ? ` | ${projectionOnlyCount} solo proyeccion` : ""}${pyEspnOnlyCount ? ` | ${pyEspnOnlyCount} solo PyESPN` : ""}`,
+              };
+            } else if (pyEspnOnlyCount) {
+              health.props = {
+                state: "ok",
+                mode: "live",
+                winner: "pyespn",
+                detail: `${pyEspnOnlyCount} jugador(es) NFL con game logs ESPN`,
+              };
+            } else if (projectionOnlyCount) {
+              health.props = {
+                state: "warn",
+                mode: "fallback",
+                winner: "sportsapipro",
+                detail: `${projectionOnlyCount} jugador(es) NFL con proyeccion, aun sin game logs recientes`,
+              };
+            } else {
+              health.props = {
+                state: "warn",
+                mode: "fallback",
+                winner: "estimated",
+                detail: "Props NFL cargados, pero sin datos de jugador enlazados",
+              };
+            }
+          }
+          if (propCount) {
+            health.odds = {
+              ...health.odds,
+              state: "ok",
+              detail: `${health.odds.detail}${health.odds.detail.includes("props") ? "" : ` | props ${propCount}`}`,
+            };
+            log(`Props reales cargados para ${sport.toUpperCase()}: ${propCount} mercado(s) de jugador.`);
+          }
+        } else {
+          health.props = { state: "warn", mode: "fallback", detail: `No llegaron props reales para ${sport.toUpperCase()}` };
+        }
+      } catch (error) {
+        currentPropStatsBook = {};
+        health.props = { state: "warn", mode: "fallback", detail: `Props no disponibles: ${error.message}` };
+        log(`Props no disponibles para ${sport.toUpperCase()}. Seguimos sin ellos. Detalle: ${error.message}`);
+      }
+    }
+  } else {
+    currentPropStatsBook = {};
+    health.props = { state: "idle", mode: "idle", detail: "No aplica para este deporte o fuente" };
+  }
+
+  const externalLayer = await loadExternalLayer({ sport, leagueId });
+  health.external = {
+    state: (Object.keys(externalLayer.externalRef?.standings || {}).length || Object.keys(externalLayer.externalRef?.injuries || {}).length || externalLayer.source === "oddsapi") ? "ok" : "warn",
+    mode: externalLayer.mode,
+    winner: externalLayer.source,
+    detail: externalLayer.detail,
+  };
+  log(`External ${leagueMeta?.name || sport}: ${externalLayer.detail}`);
+  externalLayer.failures.forEach((failure) => log(`External fallback: ${failure}`));
+
+  return {
+    games: fixturesLayer.games,
+    recentGames,
+    formBook: buildFormBook(recentGames, sport),
+    scheduleContext: buildScheduleContext(fixturesLayer.games, recentGames),
+    source: fixturesLayer.source,
+    leagueId,
+    leagueName: leagueMeta?.name || sportProfiles[sport]?.apiName || "",
+    oddsEvents,
+    validationGames: validationPackage.games,
+    validationSource: validationPackage.source,
+    externalRef: externalLayer.externalRef,
+    health,
+    updatedAt: new Date().toLocaleString("es-MX"),
+    backendTips: fixturesLayer.backendTips || [],
+  };
+}
+
 async function loadDataPackage() {
   const sport = els.sport.value;
   const leagueId = els.league.value;
   const apiChoice = els.api.value;
   const leagueMeta = selectedLeagueMeta();
-  const health = {
-    source: { state: "idle", detail: "Sin intentar" },
-    recent: { state: "idle", detail: "Sin intentar" },
-    odds: { state: "idle", detail: "Sin intentar" },
-    external: { state: "idle", detail: "Sin intentar" },
-    props: { state: "idle", detail: "Sin intentar" },
-  };
 
   if (isAllSoccerSelection()) {
-    log("Futbol total activo. Juntando ligas de futbol con fuentes reales y fallback controlado.");
+    log("Futbol total activo. Juntando ligas de futbol con capas separadas y fallback controlado.");
     const packages = await Promise.allSettled(
       (leagues.soccer || []).map(async (league) => {
-        let backendPackage = null;
-        let games = [];
-        let recentGames = [];
-        let oddsEvents = [];
-        let validationGames = [];
-        let externalRef = { source: "base", standings: {}, injuries: {} };
-        let tips = [];
-
-        try {
-          backendPackage = await fetchBackendPicksPackage("soccer", league.id);
-          games = backendPackage.games || [];
-          recentGames = backendPackage.recentGames || [];
-          oddsEvents = backendPackage.oddsEvents || [];
-          validationGames = backendPackage.validationGames || [];
-          externalRef = backendPackage.externalRef || externalRef;
-          tips = backendPackage.tips || [];
-        } catch (error) {
-          backendPackage = null;
-        }
-
-        if (!games.length && apiChoice !== "backend") {
-          try {
-            const upcoming = await sportsDataApi.getUpcomingGames({ sport: "soccer", leagueId: league.id, apiChoice });
-            games = upcoming.games || [];
-            oddsEvents = upcoming.oddsEvents || oddsEvents;
-          } catch (error) {
-            games = games || [];
-          }
-          try {
-            recentGames = await sportsDataApi.getRecentGames({ sport: "soccer", leagueId: league.id, apiChoice });
-          } catch (error) {
-            recentGames = recentGames || [];
-          }
-          try {
-            const validationPackage = await fetchValidationGames("soccer", league.id, apiChoice);
-            validationGames = validationPackage.games || validationGames;
-          } catch (error) {
-            validationGames = validationGames || [];
-          }
-          try {
-            externalRef = await fetchExternalReferencePackage("soccer", league.id);
-          } catch (error) {
-            externalRef = externalRef || { source: "base", standings: {}, injuries: {} };
-          }
-        }
+        const packageByLeague = await loadSingleLeagueDataPackage({
+          sport: "soccer",
+          leagueId: league.id,
+          apiChoice,
+          leagueMeta: league,
+          allowDemo: false,
+        });
 
         const annotate = (game) => ({
           ...game,
@@ -7160,12 +7693,13 @@ async function loadDataPackage() {
         });
         return {
           league,
-          games: (games || []).map(annotate),
-          recentGames: (recentGames || []).map(annotate),
-          oddsEvents: oddsEvents || [],
-          validationGames: (validationGames || []).map(annotate),
-          externalRef: externalRef || { source: "base", standings: {}, injuries: {} },
-          tips: (tips || []).map((tip) => ({
+          games: (packageByLeague.games || []).map(annotate),
+          recentGames: (packageByLeague.recentGames || []).map(annotate),
+          oddsEvents: packageByLeague.oddsEvents || [],
+          validationGames: (packageByLeague.validationGames || []).map(annotate),
+          externalRef: packageByLeague.externalRef || { source: "base", standings: {}, injuries: {} },
+          health: packageByLeague.health || {},
+          tips: (packageByLeague.backendTips || []).map((tip) => ({
             ...tip,
             leagueId: tip?.leagueId || league.id,
             leagueName: tip?.leagueName || league.name,
@@ -7186,7 +7720,11 @@ async function loadDataPackage() {
     const standings = Object.assign({}, ...merged.map((entry) => entry.externalRef?.standings || {}));
     const injuries = Object.assign({}, ...merged.map((entry) => entry.externalRef?.injuries || {}));
     const loadedLeagueCount = merged.filter((entry) => (entry.games || []).length).length;
-    log(`Futbol total: ${games.length} partido(s) reunidos desde ${loadedLeagueCount} liga(s) con fallback por liga.`);
+    const liveFixturesCount = merged.filter((entry) => entry.health?.source?.mode === "live").length;
+    const cacheFixturesCount = merged.filter((entry) => entry.health?.source?.mode === "cache").length;
+    const liveOddsCount = merged.filter((entry) => entry.health?.odds?.mode === "live").length;
+    const cacheOddsCount = merged.filter((entry) => entry.health?.odds?.mode === "cache").length;
+    log(`Futbol total: ${games.length} partido(s) reunidos desde ${loadedLeagueCount} liga(s) | fixtures live ${liveFixturesCount}, cache ${cacheFixturesCount} | odds live ${liveOddsCount}, cache ${cacheOddsCount}.`);
 
     return {
       games,
@@ -7201,232 +7739,48 @@ async function loadDataPackage() {
       validationSource: "backend",
       externalRef: { source: "backend", standings, injuries },
       health: {
-        source: { state: games.length ? "ok" : "warn", detail: `Futbol total · ${games.length} partido(s) desde ${loadedLeagueCount} liga(s)` },
-        recent: { state: recentGames.length ? "ok" : "warn", detail: `${recentGames.length} resultado(s) recientes cargados` },
-        odds: { state: oddsEvents.length ? "ok" : "warn", detail: oddsEvents.length ? `Odds concentradas · ${oddsEvents.length} evento(s)` : "Sin odds reales concentradas" },
-        external: { state: Object.keys(standings).length || Object.keys(injuries).length ? "ok" : "warn", detail: "Referencias cruzadas por liga" },
-        props: { state: "idle", detail: "No aplica para futbol total" },
+        source: {
+          state: games.length ? "ok" : "warn",
+          mode: liveFixturesCount ? "live" : cacheFixturesCount ? "cache" : "fallback",
+          winner: "soccer_total",
+          detail: `Fixtures: ${games.length} partido(s) desde ${loadedLeagueCount} liga(s)`,
+        },
+        recent: {
+          state: recentGames.length ? "ok" : "warn",
+          mode: recentGames.length ? "live" : "fallback",
+          winner: "soccer_total",
+          detail: `${recentGames.length} resultado(s) recientes cargados`,
+        },
+        odds: {
+          state: oddsEvents.length ? "ok" : "warn",
+          mode: liveOddsCount ? "live" : cacheOddsCount ? "cache" : "fallback",
+          winner: oddsEvents.length ? "soccer_total" : "estimated",
+          detail: oddsEvents.length ? `Odds: ${oddsEvents.length} evento(s) concentrados` : "Sin odds reales concentradas",
+        },
+        external: {
+          state: Object.keys(standings).length || Object.keys(injuries).length ? "ok" : "warn",
+          mode: Object.keys(standings).length || Object.keys(injuries).length ? "live" : "fallback",
+          winner: Object.keys(standings).length || Object.keys(injuries).length ? "soccer_total" : "base",
+          detail: "External: referencias cruzadas por liga",
+        },
+        props: { state: "idle", mode: "idle", winner: "idle", detail: "No aplica para futbol total" },
       },
       updatedAt: new Date().toLocaleString("es-MX"),
       backendTips,
     };
   }
 
-  log("Consultando API interna del bot y fuentes gratuitas.");
-  const upcoming = await sportsDataApi.getUpcomingGames({ sport, leagueId, apiChoice });
-  if (apiChoice === "backend" && upcoming.backendPackage) {
-    const backendGames = upcoming.backendPackage.games || [];
-    const backendTips = upcoming.backendPackage.tips || [];
-    if (!backendGames.length && !backendTips.length && workMode) {
-      return {
-        games: demoGames[sport],
-        recentGames: [],
-        formBook: {},
-        scheduleContext: { lastPlayed: {} },
-        source: "demo",
-        leagueId,
-        leagueName: leagueMeta?.name || sportProfiles[sport]?.apiName || "",
-        oddsEvents: [],
-        validationGames: [],
-        validationSource: "demo",
-        externalRef: { source: "demo", standings: {}, injuries: {} },
-        health: {
-          source: { state: "warn", detail: "Modo trabajo activo · usando demo local por bloqueo de red." },
-          recent: { state: "warn", detail: "Sin historico por politica de red." },
-          odds: { state: "warn", detail: "Sin odds reales por politica de red." },
-          external: { state: "warn", detail: "Sin referencias externas por politica de red." },
-        },
-        updatedAt: new Date().toLocaleString("es-MX"),
-        backendTips: [],
-      };
-    }
-    return {
-      games: backendGames,
-      recentGames: upcoming.backendPackage.recentGames || [],
-      formBook: {},
-      scheduleContext: { lastPlayed: {} },
-      source: "backend",
-      leagueId,
-      leagueName: leagueMeta?.name || sportProfiles[sport]?.apiName || "",
-      oddsEvents: upcoming.backendPackage.oddsEvents || [],
-      validationGames: [],
-      validationSource: "backend",
-      externalRef: upcoming.backendPackage.externalRef || { source: "backend", standings: {}, injuries: {} },
-      health: upcoming.backendPackage.health || health,
-      updatedAt: upcoming.backendPackage.updatedAt || new Date().toLocaleString("es-MX"),
-      backendTips,
-    };
-  }
-  health.source = {
-    state: upcoming.games?.length ? "ok" : "warn",
-    detail: `${dataSourceLabels[upcoming.source] || upcoming.source} · ${upcoming.games?.length || 0} partido(s)`,
-  };
-  if (sport === "mlb") {
-    try {
-      const lineupDates = [...new Set((upcoming.games || []).map((game) => game.date).filter(Boolean))].slice(0, 4);
-      const lineupRows = (await Promise.all(lineupDates.map((date) => fetchSportsDataIoMlbStartingLineupsByDate(date)))).flat();
-      currentMlbLineupBook = buildMlbLineupBook(lineupRows);
-    } catch (error) {
-      currentMlbLineupBook = {};
-      log(`Lineups MLB no disponibles. Seguimos sin esa capa. Detalle: ${error.message}`);
-    }
-  } else {
-    currentMlbLineupBook = {};
-  }
-  const validationPackage = await fetchValidationGames(sport, leagueId, apiChoice);
-  let recentGames = [];
-  let oddsEvents = upcoming.oddsEvents || [];
-  let externalRef = { source: "base", standings: {}, injuries: {} };
-
-  try {
-    recentGames = await sportsDataApi.getRecentGames({ sport, leagueId, apiChoice });
-    health.recent = {
-      state: recentGames.length ? "ok" : "warn",
-      detail: `${recentGames.length} resultado(s) recientes cargados`,
-    };
-  } catch (error) {
-    health.recent = { state: "warn", detail: `Historico no disponible: ${error.message}` };
-    log(`No se pudo cargar historico reciente. Se usaran ratings mixtos. Detalle: ${error.message}`);
-  }
-
-  if (!oddsEvents.length && apiChoice !== "demo") {
-    try {
-      const preferredOdds = await fetchPreferredOddsEvents(sport, leagueId, apiChoice);
-      oddsEvents = preferredOdds.events;
-      health.odds = {
-        state: oddsEvents.length ? "ok" : "warn",
-        detail: oddsEvents.length
-          ? `${dataSourceLabels[preferredOdds.source] || preferredOdds.source} · ${oddsEvents.length} evento(s)`
-          : "Sin odds reales; usando estimadas",
-      };
-      if (oddsEvents.length) {
-        log(`Odds reales cargadas desde ${dataSourceLabels[preferredOdds.source] || preferredOdds.source}: ${oddsEvents.length} eventos.`);
-      }
-    } catch (error) {
-      health.odds = { state: "warn", detail: `Odds no disponibles: ${error.message}` };
-    }
-  } else {
-    health.odds = {
-      state: oddsEvents.length ? "ok" : "warn",
-      detail: oddsEvents.length ? `Odds activas desde ${dataSourceLabels[upcoming.source] || upcoming.source}` : "Sin odds reales en la fuente principal",
-    };
-  }
-
-  const propsMarkets = propsMarketsForSport(sport);
-  if ((sport === "nba" || sport === "nfl") && apiChoice !== "demo" && propsMarkets) {
-    try {
-      const propEvents = await fetchOddsApi(sport, leagueId, propsMarkets);
-      if (propEvents.length) {
-        oddsEvents = mergeOddsEvents(oddsEvents, propEvents, sport);
-        const propCount = oddsEvents.reduce((sum, event) => sum + buildPropMarketEntriesForEvent(event).length, 0);
-        if (sport === "nba") {
-          currentPropStatsBook = await buildNbaPropStatsBook(oddsEvents);
-          const nbaStatsCount = Object.keys(currentPropStatsBook || {}).length;
-          const pyEspnCount = Object.values(currentPropStatsBook || {}).filter((entry) => String(entry?.source || "").includes("pyespn")).length;
-          health.props = {
-            state: nbaStatsCount ? "ok" : "warn",
-            detail: nbaStatsCount
-              ? (pyEspnCount
-                ? `PyESPN + stats NBA para ${pyEspnCount} jugador(es)`
-                : `Stats reales NBA activas para ${nbaStatsCount} jugador(es)`)
-              : "Props NBA cargados, pero sin stats reales enlazadas",
-          };
-        } else if (sport === "nfl") {
-          currentPropStatsBook = await buildNflPropStatsBook(oddsEvents);
-          const nflPropEntries = Object.values(currentPropStatsBook || {});
-          const pyEspnHybridCount = nflPropEntries.filter((entry) => entry?.source === "pyespn-sportsdataio-hybrid").length;
-          const hybridCount = nflPropEntries.filter((entry) => entry?.source === "sportsdataio-hybrid").length;
-          const pyEspnOnlyCount = nflPropEntries.filter((entry) => entry?.source === "pyespn-nfl").length;
-          const projectionOnlyCount = nflPropEntries.filter((entry) => entry?.source === "sportsdataio").length;
-          const sportsDataKey = configValue("sportsdataApiKey", "sportsDataIoApiKey");
-          if (!sportsDataKey || sportsDataKey === "replace_me") {
-            log("NFL props: sin SportsDataIO configurado, seguimos con consenso de books hasta conectar game logs reales.");
-            health.props = {
-              state: pyEspnOnlyCount ? "ok" : "warn",
-              detail: pyEspnOnlyCount
-                ? `${pyEspnOnlyCount} jugador(es) NFL con game logs ESPN`
-                : "SportsDataIO no configurado; NFL props sigue en consenso de books",
-            };
-          } else if (pyEspnHybridCount || hybridCount) {
-            log(`NFL props: ${pyEspnHybridCount || hybridCount} jugador(es) ya combinan logs reales con proyeccion semanal.${projectionOnlyCount ? ` ${projectionOnlyCount} siguen solo con proyeccion.` : ""}`);
-            health.props = {
-              state: "ok",
-              detail: `${pyEspnHybridCount || hybridCount} jugador(es) NFL con logs + proyeccion${projectionOnlyCount ? ` | ${projectionOnlyCount} solo proyeccion` : ""}${pyEspnOnlyCount ? ` | ${pyEspnOnlyCount} solo PyESPN` : ""}`,
-            };
-          } else if (pyEspnOnlyCount) {
-            health.props = {
-              state: "ok",
-              detail: `${pyEspnOnlyCount} jugador(es) NFL con game logs ESPN`,
-            };
-          } else if (projectionOnlyCount) {
-            log(`NFL props: hay ${projectionOnlyCount} jugador(es) con proyeccion, pero aun no entran game logs recientes para esta semana.`);
-            health.props = {
-              state: "warn",
-              detail: `${projectionOnlyCount} jugador(es) NFL con proyeccion, aun sin game logs recientes`,
-            };
-          } else {
-            health.props = {
-              state: "warn",
-              detail: "Props NFL cargados, pero sin datos de jugador enlazados",
-            };
-          }
-        } else {
-          currentPropStatsBook = {};
-          health.props = { state: "idle", detail: "Sin props para este deporte" };
-        }
-        if (propCount) {
-          health.odds = {
-            state: "ok",
-            detail: `${health.odds.detail}${health.odds.detail.includes("props") ? "" : ` | props ${propCount}`}`,
-          };
-          log(`Props reales cargados para ${sport.toUpperCase()}: ${propCount} mercado(s) de jugador.`);
-        }
-      } else {
-        health.props = { state: "warn", detail: `No llegaron props reales para ${sport.toUpperCase()}` };
-      }
-    } catch (error) {
-      currentPropStatsBook = {};
-      health.props = { state: "warn", detail: `Props no disponibles: ${error.message}` };
-      log(`Props no disponibles para ${sport.toUpperCase()}. Seguimos sin ellos. Detalle: ${error.message}`);
-    }
-  } else {
-    currentPropStatsBook = {};
-    health.props = { state: "idle", detail: "No aplica para este deporte o fuente" };
-  }
-
-  try {
-    externalRef = await fetchExternalReferencePackage(sport, leagueId);
-    const extCount = Object.keys(externalRef.standings || {}).length + Object.keys(externalRef.injuries || {}).length;
-    health.external = {
-      state: extCount ? "ok" : "warn",
-      detail: extCount ? `Referencia ${externalRef.source} activa` : "Sin referencias externas utiles",
-    };
-  } catch (error) {
-    health.external = { state: "warn", detail: `Referencia externa no disponible: ${error.message}` };
-  }
-  const updatedAt = new Date().toLocaleString("es-MX");
-  const preparedGames = sport === "mlb" ? (upcoming.games || []).map(enrichMlbGameContext) : upcoming.games;
-
-  return {
-    games: preparedGames,
-    recentGames,
-    formBook: buildFormBook(recentGames, sport),
-    scheduleContext: buildScheduleContext(upcoming.games, recentGames),
-    source: upcoming.source,
-    leagueId,
-    leagueName: leagueMeta?.name || sportProfiles[sport]?.apiName || "",
-    oddsEvents,
-    validationGames: validationPackage.games,
-    validationSource: validationPackage.source,
-    externalRef,
-    health,
-    updatedAt,
-  };
+  log("Consultando capas separadas: fixtures, odds y referencias externas.");
+  return loadSingleLeagueDataPackage({ sport, leagueId, apiChoice, leagueMeta, allowDemo: true });
 }
 
 function renderTips(tips) {
   els.tips.innerHTML = "";
   const targetDate = currentCalendarDate || isoToday();
+  const isSoccerSlate = els.sport.value === "soccer";
+  if (els.soccerMarketToolbar) {
+    els.soccerMarketToolbar.hidden = !isSoccerSlate;
+  }
   const candidatePool = Array.isArray(window.__lastSlateCandidates) && window.__lastSlateCandidates.length
     ? window.__lastSlateCandidates
     : tips;
@@ -7439,6 +7793,129 @@ function renderTips(tips) {
   const visibleGames = slateResolution.games.length ? slateResolution.games : fallbackGames;
 
   if (visibleGames.length) {
+    if (isSoccerSlate && soccerViewMode() === "flat") {
+      const roleFilter = els.soccerMarketRole?.value || "all";
+      const threshold = soccerMarketThreshold();
+      const flatGroups = allValidTipsForSlate(visibleGames, candidatePool, { threshold, roleFilter });
+      const flatRows = flatGroups.flatMap((group) => group.markets.map((entry) => ({ game: group.game, ...entry })));
+      els.source.textContent = `Vista plana | ${flatRows.length} mercado(s)`;
+      els.picksOverviewState.textContent = "Mercados";
+      els.picksOverviewStateDetail.textContent = `Filtro ${roleFilter === "all" ? "todos" : roleFilter} | corte ${threshold}%`;
+      els.tips.innerHTML = `
+        <div class="slate-table-shell">
+          <table class="slate-table">
+            <thead>
+              <tr>
+                <th>Liga</th>
+                <th>Partido</th>
+                <th>Rol</th>
+                <th>Mercado</th>
+                <th>Fecha</th>
+                <th>Cuota</th>
+                <th>EV</th>
+                <th>Conf.</th>
+                <th>Estado</th>
+                <th>Accion</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${flatGroups.map((group) => {
+                const leagueLabel = group.markets[0]?.tip?.leagueName || group.game?.leagueName || "Futbol";
+                const groupKey = slateGameKey(group.game);
+                if (!group.markets.length) {
+                  return `
+                    <tr class="slate-group-row">
+                      <td colspan="10">
+                        <div class="slate-group-label">
+                          <strong>${leagueLabel}</strong>
+                          <span>${group.game.away} @ ${group.game.home}</span>
+                        </div>
+                      </td>
+                    </tr>
+                    <tr class="slate-row no-bet">
+                      <td>${leagueLabel}</td>
+                      <td>
+                        <div class="slate-match-cell">
+                          <strong>${group.game.away} @ ${group.game.home}</strong>
+                          <span>${group.game.status || "Programado"}</span>
+                        </div>
+                      </td>
+                      <td><span class="slate-role-pill value">Sin paso</span></td>
+                      <td><div class="slate-flat-empty">Ningun mercado supero el corte actual.</div></td>
+                      <td>${group.game.date || "--"}</td>
+                      <td>--</td>
+                      <td>--</td>
+                      <td>--</td>
+                      <td><span class="pill grade-pill grade-c">No bet</span></td>
+                      <td><span class="slate-action-text">Esperar</span></td>
+                    </tr>
+                  `;
+                }
+                const rows = group.markets.map((entry, index) => {
+                  const { tip, role, rank } = entry;
+                  const id = tipId(tip);
+                  const suggestedStake = recommendedStakeForTip(tip);
+                  const grade = recommendationGradeMeta(tip);
+                  const action = recommendationActionForTip(tip);
+                  currentTrackingItems[id] = { kind: "tip", payload: tip };
+                  return `
+                    <tr class="slate-row flat-market-row ${action.key}">
+                      <td>${index === 0 ? leagueLabel : ""}</td>
+                      <td>
+                        <div class="slate-match-cell">
+                          <strong>${tip.game.away} @ ${tip.game.home}</strong>
+                          <span>${tip.game.status || "Programado"}</span>
+                        </div>
+                      </td>
+                      <td><span class="slate-role-pill ${role.key}">${role.label}</span></td>
+                      <td>
+                        <div class="slate-market-cell">
+                          <strong>${rank}. ${tip.type}</strong>
+                          <span>${tip.pick}</span>
+                          <em>${tip.reason}</em>
+                        </div>
+                      </td>
+                      <td>${tip.game.date || "--"}</td>
+                      <td>${tip.odds.toFixed(2)}x</td>
+                      <td>${tip.ev > 0 ? "+" : ""}${tip.ev}%</td>
+                      <td>${toPercent(tip.confidence)}</td>
+                      <td>
+                        <span class="pill grade-pill ${grade.key}">${grade.grade}</span>
+                        <span class="pill ${tip.confidence >= 60 ? "pick-clean-badge safe" : tip.confidence >= 55 ? "pick-clean-badge medium" : "pick-clean-badge light"}">${action.label}</span>
+                      </td>
+                      <td>
+                        <div class="slate-row-actions">
+                          <input class="stake-field compact-stake" type="number" min="0.1" step="0.1" value="${suggestedStake}" data-stake-id="${id}" />
+                          <button class="ghost-btn" type="button" data-share-tip="${id}">Imagen</button>
+                          <button class="ghost-btn" type="button" data-ticket-add="${id}">Ticket</button>
+                        </div>
+                      </td>
+                    </tr>
+                  `;
+                }).join("");
+                return `
+                  <tr class="slate-group-row">
+                    <td colspan="10">
+                      <div class="slate-group-label">
+                        <strong>${leagueLabel}</strong>
+                        <span>${group.game.away} @ ${group.game.home}</span>
+                        <span>${group.markets.length} mercado(s) sobre ${threshold}%</span>
+                      </div>
+                    </td>
+                  </tr>
+                  ${rows}
+                `;
+              }).join("")}
+            </tbody>
+          </table>
+        </div>
+      `;
+      if (slateResolution.expanded) {
+        log(`Slate corto en ${targetDate}. Mostrando una vista ampliada con ${visibleGames.length} partido(s) proximos cargados.`);
+      }
+      return;
+    }
+
     els.tips.innerHTML = `
       <div class="slate-table-shell">
         <table class="slate-table">
@@ -7934,6 +8411,7 @@ async function run() {
           ...(cachedPackage.health || {}),
           source: {
             state: "warn",
+            mode: "cache",
             detail: `Cache local activa · origen previo ${dataSourceLabels[cachedPackage.source] || cachedPackage.source || "desconocido"}`,
           },
         },
@@ -7942,6 +8420,7 @@ async function run() {
       saveSourcePackageEntry(cacheKey, dataPackage);
     }
     log(`Fuente ganadora: ${dataSourceLabels[dataPackage.source] || dataPackage.source || "desconocida"} · ${dataPackage.games?.length || 0} partido(s).`);
+    logLayerSummary(dataPackage.health || {});
     const normalizedGames = dataPackage.games.length ? dataPackage.games : demoGames[els.sport.value];
     const targetSlateDate = selectTargetSlateDate(normalizedGames);
     currentCalendarDate = targetSlateDate;
@@ -8019,6 +8498,14 @@ async function run() {
     renderMarketExplorer(tips);
     renderAlertsCenter(tips, oddsAlerts);
     maybeSendNotifications(tips, oddsAlerts);
+    renderPicksOverviewStatus({
+      leagueName: dataPackage.leagueName,
+      targetDate: targetSlateDate,
+      slateGames,
+      tips,
+      health: dataPackage.health || {},
+      source: dataPackage.source,
+    });
     let telegramHealth = { state: "warn", detail: "Sin intento de autoenvio." };
     try {
       telegramHealth = await maybeAutoSendTelegramTop(tips);
@@ -8029,12 +8516,16 @@ async function run() {
     renderFeedHealth({
       sourceState: dataPackage.health?.source?.state || (dataPackage.games.length ? "ok" : "warn"),
       sourceDetail: dataPackage.health?.source?.detail || `${dataSourceLabels[dataPackage.source] || dataPackage.source} · ${slateGames.length}/${normalizedGames.length} partido(s) del slate ${targetSlateDate}`,
+      sourceMode: dataPackage.health?.source?.mode || "idle",
       oddsState: dataPackage.health?.odds?.state || (currentOddsBook.length ? "ok" : "warn"),
       oddsDetail: dataPackage.health?.odds?.detail || (currentOddsBook.length ? `${currentOddsBook.length} evento(s) con odds reales` : "Sin odds reales activas; usando estimadas"),
+      oddsMode: dataPackage.health?.odds?.mode || "idle",
       externalState: dataPackage.health?.external?.state || (Object.keys(dataPackage.externalRef?.standings || {}).length || Object.keys(dataPackage.externalRef?.injuries || {}).length ? "ok" : "warn"),
       externalDetail: dataPackage.health?.external?.detail || (dataPackage.externalRef?.source ? `Referencia ${dataPackage.externalRef.source}` : "Sin referencias externas"),
+      externalMode: dataPackage.health?.external?.mode || "idle",
       propsState: dataPackage.health?.props?.state || "idle",
       propsDetail: dataPackage.health?.props?.detail || "Sin diagnostico de props",
+      propsMode: dataPackage.health?.props?.mode || "idle",
       telegramState: telegramHealth.state,
       telegramDetail: telegramHealth.detail,
       updatedAt: dataPackage.updatedAt,
@@ -8069,6 +8560,7 @@ async function run() {
             ...(cachedPackage.health || {}),
             source: {
               state: "warn",
+              mode: "cache",
               detail: `Cache local activa tras error · origen previo ${dataSourceLabels[cachedPackage.source] || cachedPackage.source || "desconocido"}`,
             },
           },
@@ -8146,17 +8638,30 @@ async function run() {
         renderBacktest();
         renderShareImagePreview();
         renderWatchlist();
+        renderPicksOverviewStatus({
+          leagueName: dataPackage.leagueName,
+          targetDate: targetSlateDate,
+          slateGames,
+          tips,
+          health: dataPackage.health || {},
+          source: dataPackage.source,
+        });
         renderFeedHealth({
           sourceState: "warn",
           sourceDetail: `Cache local activa tras error duro (${error.message})`,
+          sourceMode: dataPackage.health?.source?.mode || "cache",
           oddsState: dataPackage.health?.odds?.state || "warn",
           oddsDetail: dataPackage.health?.odds?.detail || "Cache local",
+          oddsMode: dataPackage.health?.odds?.mode || "cache",
           externalState: dataPackage.health?.external?.state || "warn",
           externalDetail: dataPackage.health?.external?.detail || "Cache local",
+          externalMode: dataPackage.health?.external?.mode || "cache",
           propsState: dataPackage.health?.props?.state || "idle",
           propsDetail: dataPackage.health?.props?.detail || "Cache local",
+          propsMode: dataPackage.health?.props?.mode || "cache",
           updatedAt: dataPackage.updatedAt || new Date().toLocaleString("es-MX"),
         });
+        logLayerSummary(dataPackage.health || {});
         renderEvRejectReasons(rejectReasons, { strongOnly: Boolean(settings.evStrongOnly), valid: passedRawTips.length, rejected: rawTips.length - passedRawTips.length });
         await bootstrapBackendTelemetry();
         renderBackendActivity();
@@ -8238,16 +8743,36 @@ async function run() {
     renderMarketExplorer(tips);
     renderAlertsCenter(tips, oddsAlerts);
     maybeSendNotifications(tips, oddsAlerts);
+    renderPicksOverviewStatus({
+      leagueName: leagueMeta?.name || sportProfiles[sport]?.apiName || "",
+      targetDate: targetSlateDate,
+      slateGames,
+      tips,
+      health: {
+        source: { mode: "fallback" },
+        odds: { mode: "fallback" },
+        external: { mode: "fallback" },
+      },
+      source: "demo",
+    });
     renderFeedHealth({
       sourceState: "warn",
       sourceDetail: "Modo demo local",
+      sourceMode: "fallback",
       oddsState: "warn",
       oddsDetail: "Sin odds reales activas",
+      oddsMode: "fallback",
       externalState: "warn",
       externalDetail: "Sin referencias externas en demo",
+      externalMode: "fallback",
       telegramState: "warn",
       telegramDetail: "No se autoenvia desde demo por seguridad",
       updatedAt: new Date().toLocaleString("es-MX"),
+    });
+    logLayerSummary({
+      source: { mode: "fallback", winner: "demo" },
+      odds: { mode: "fallback", winner: "estimated" },
+      external: { mode: "fallback", winner: "base" },
     });
     saveOddsSnapshot(tips);
     autoGradeHistory([]);
@@ -8357,6 +8882,15 @@ els.evStrongOnly?.addEventListener("change", run);
 els.realOnly.addEventListener("change", run);
 els.soccerParlayScope?.addEventListener("change", run);
 els.soccerTopThree?.addEventListener("change", () => {
+  renderTips(window.__lastRenderedTips || []);
+});
+els.soccerViewMode?.addEventListener("change", () => {
+  renderTips(window.__lastRenderedTips || []);
+});
+els.soccerMarketRole?.addEventListener("change", () => {
+  renderTips(window.__lastRenderedTips || []);
+});
+els.soccerMarketThreshold?.addEventListener("input", () => {
   renderTips(window.__lastRenderedTips || []);
 });
 els.bankroll.addEventListener("input", () => {

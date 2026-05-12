@@ -22,8 +22,8 @@ body {
   margin: 0;
   min-height: 100vh;
   background:
-    linear-gradient(rgba(17, 20, 18, 0.68), rgba(17, 20, 18, 0.92)),
-    url("https://images.unsplash.com/photo-1519861531473-9200262188bf?auto=format&fit=crop&w=1800&q=80") center / cover fixed;
+    linear-gradient(rgba(8, 10, 9, 0.84), rgba(8, 10, 9, 0.96)),
+    url("assets/branding/mr_bushido_banner_oscuro_1920px.png") center / cover fixed;
   color: var(--text);
 }
 
@@ -45,7 +45,32 @@ select {
   grid-template-columns: 1fr 320px;
   align-items: end;
   gap: 28px;
-  padding: 32px 0;
+  padding: 32px;
+  border: 1px solid rgba(244, 247, 241, 0.14);
+  border-radius: 8px;
+  background: linear-gradient(135deg, rgba(9, 10, 10, 0.94), rgba(17, 20, 18, 0.96));
+  box-shadow: var(--shadow);
+}
+
+.hero-brandmark {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-bottom: 14px;
+}
+
+.hero-brandmark img {
+  width: 66px;
+  height: 66px;
+  object-fit: cover;
+  border-radius: 8px;
+  border: 1px solid rgba(244, 247, 241, 0.16);
+}
+
+.hero-brandmark strong {
+  display: block;
+  color: #d8c3a0;
+  font-size: 0.95rem;
 }
 
 .eyebrow {
@@ -657,9 +682,25 @@ button:hover {
   margin-bottom: 10px;
 }
 
+.parlay-health-row {
+  margin-top: 10px;
+}
+
 .parlay-badge {
   background: rgba(255, 255, 255, 0.05);
   border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.parlay-unavailable {
+  border-color: rgba(255, 107, 95, 0.28);
+}
+
+.parlay-missing {
+  list-style: none;
+  padding: 12px 14px;
+  border-radius: 6px;
+  background: rgba(255, 107, 95, 0.08);
+  color: #ffc7c2;
 }
 
 .parlay-composition {
@@ -902,6 +943,77 @@ button:hover {
   gap: 12px;
 }
 
+.picks-overview {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.picks-overview article {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgba(16, 21, 18, 0.54);
+  padding: 12px 14px;
+}
+
+.picks-overview span {
+  display: block;
+  color: var(--muted);
+  font-size: 0.74rem;
+  text-transform: uppercase;
+  font-weight: 800;
+}
+
+.picks-overview strong {
+  display: block;
+  margin-top: 6px;
+  color: var(--text);
+  font-size: 1rem;
+}
+
+.picks-overview p {
+  margin: 6px 0 0;
+  color: var(--muted);
+  font-size: 0.82rem;
+  line-height: 1.35;
+}
+
+.picks-transparency-legend {
+  display: grid;
+  gap: 4px;
+  margin-bottom: 12px;
+  color: var(--muted);
+}
+
+.picks-transparency-legend strong {
+  color: var(--text);
+}
+
+.soccer-market-toolbar {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.soccer-market-toolbar label {
+  display: grid;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+
+.soccer-market-toolbar select,
+.soccer-market-toolbar input {
+  width: 100%;
+}
+
+.soccer-league-filter {
+  margin-bottom: 12px;
+  flex-wrap: wrap;
+}
+
 .slate-table-shell {
   overflow-x: auto;
   border: 1px solid var(--line);
@@ -931,6 +1043,28 @@ button:hover {
   background: rgba(255, 255, 255, 0.03);
 }
 
+.slate-group-row td {
+  padding: 10px 14px;
+  border-top: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(82, 210, 115, 0.08);
+}
+
+.slate-group-label {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 0.84rem;
+}
+
+.slate-group-label strong {
+  color: var(--text);
+}
+
+.slate-group-label span {
+  color: var(--accent);
+  font-weight: 800;
+}
+
 .slate-row.bet {
   background: rgba(82, 210, 115, 0.04);
 }
@@ -945,6 +1079,61 @@ button:hover {
 
 .slate-row.no-bet {
   background: rgba(255, 107, 107, 0.03);
+}
+
+.slate-row.flat-market-row td {
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.slate-role-pill {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  padding: 5px 9px;
+  font-size: 0.74rem;
+  font-weight: 800;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+.slate-role-pill.principal {
+  border-color: rgba(82, 210, 115, 0.35);
+  color: #aaf0bb;
+  background: rgba(82, 210, 115, 0.1);
+}
+
+.slate-role-pill.coverage {
+  border-color: rgba(88, 166, 255, 0.35);
+  color: #b8d8ff;
+  background: rgba(88, 166, 255, 0.1);
+}
+
+.slate-role-pill.value {
+  border-color: rgba(242, 193, 78, 0.35);
+  color: #ffe3a2;
+  background: rgba(242, 193, 78, 0.1);
+}
+
+.slate-market-cell {
+  display: grid;
+  gap: 4px;
+}
+
+.slate-market-cell strong {
+  color: var(--text);
+  font-size: 0.88rem;
+}
+
+.slate-market-cell span,
+.slate-market-cell em {
+  color: var(--muted);
+  font-size: 0.8rem;
+  font-style: normal;
+}
+
+.slate-flat-empty {
+  padding: 10px 0;
+  color: var(--muted);
+  font-size: 0.84rem;
 }
 
 .slate-detail-row td {
@@ -974,6 +1163,26 @@ button:hover {
   margin-top: 4px;
   color: var(--muted);
   font-size: 0.84rem;
+}
+
+.slate-inline-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.slate-source-pill {
+  border-color: rgba(88, 166, 255, 0.35);
+  color: #b8d8ff;
+}
+
+.slate-choice-reason {
+  display: block;
+  margin-top: 8px;
+  color: var(--muted);
+  font-size: 0.8rem;
+  line-height: 1.35;
 }
 
 .slate-top-market-list {
@@ -1410,6 +1619,18 @@ button:hover {
   align-items: center;
 }
 
+.share-control {
+  display: grid;
+  gap: 4px;
+  min-width: 150px;
+}
+
+.share-control span {
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
 .share-card {
   position: relative;
   display: grid;
@@ -1417,9 +1638,20 @@ button:hover {
   border: 1px solid rgba(244, 247, 241, 0.14);
   border-radius: 8px;
   background:
-    linear-gradient(160deg, rgba(27, 33, 30, 0.96), rgba(16, 21, 18, 0.94));
+    linear-gradient(160deg, rgba(18, 18, 18, 0.96), rgba(10, 10, 10, 0.96));
   padding: 20px;
   overflow: hidden;
+}
+
+.share-card-banner {
+  position: absolute;
+  inset: 0 0 auto;
+  height: 34%;
+  background:
+    linear-gradient(180deg, rgba(8, 8, 8, 0.18), rgba(8, 8, 8, 0.88)),
+    url("assets/branding/mr_bushido_banner_oscuro_1920px.png") center / cover;
+  opacity: 0.95;
+  pointer-events: none;
 }
 
 .share-card::after {
@@ -1432,6 +1664,11 @@ button:hover {
   pointer-events: none;
 }
 
+.share-card > * {
+  position: relative;
+  z-index: 1;
+}
+
 .share-card-head,
 .share-card-footer {
   display: flex;
@@ -1440,11 +1677,33 @@ button:hover {
   align-items: center;
 }
 
+.share-brand-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.share-brand-row small {
+  display: block;
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
+.share-logo {
+  width: 54px;
+  height: 54px;
+  object-fit: cover;
+  border-radius: 8px;
+  border: 1px solid rgba(244, 247, 241, 0.18);
+  background: rgba(0, 0, 0, 0.4);
+}
+
 .share-brand {
   color: var(--muted);
   font-size: 0.8rem;
   font-weight: 800;
   text-transform: uppercase;
+  display: block;
 }
 
 .share-match {
@@ -1458,6 +1717,13 @@ button:hover {
   margin: 0;
   font-size: 1.05rem;
   color: var(--text);
+}
+
+.share-kicker {
+  margin: 6px 0 0;
+  color: #d7c4aa;
+  font-size: 0.92rem;
+  font-weight: 700;
 }
 
 .share-verdict {
@@ -1515,6 +1781,76 @@ button:hover {
   margin-top: 8px;
 }
 
+.share-legs {
+  margin: 8px 0 0;
+  padding-left: 18px;
+  display: grid;
+  gap: 8px;
+}
+
+.share-legs li {
+  display: grid;
+  gap: 2px;
+  color: var(--text);
+}
+
+.share-legs strong {
+  color: #d7c4aa;
+  font-size: 0.82rem;
+}
+
+.share-legs span,
+.share-legs em,
+.share-overflow {
+  color: var(--muted);
+  font-size: 0.88rem;
+}
+
+.share-caption-card .alert-meta {
+  display: grid;
+  gap: 8px;
+}
+
+.share-caption-text {
+  margin-top: 6px;
+  padding-top: 8px;
+  border-top: 1px solid rgba(244, 247, 241, 0.08);
+  line-height: 1.55;
+}
+
+.share-card.format-post {
+  aspect-ratio: 1 / 1;
+}
+
+.share-card.format-story {
+  aspect-ratio: 9 / 16;
+}
+
+.share-card.format-telegram {
+  aspect-ratio: 16 / 9;
+}
+
+.share-card.kind-parlay .share-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.share-card.sport-soccer {
+  border-color: rgba(82, 210, 115, 0.32);
+}
+
+.share-card.sport-mlb {
+  border-color: rgba(88, 166, 255, 0.34);
+}
+
+.share-card.sport-nba {
+  border-color: rgba(242, 193, 78, 0.34);
+}
+
+.share-card.sport-nfl,
+.share-card.sport-parlay {
+  border-color: rgba(255, 107, 95, 0.32);
+}
+
 @media (max-width: 900px) {
   .hero,
   .content-grid,
@@ -1554,6 +1890,15 @@ button:hover {
   }
 
   .history-breakdowns {
+    grid-template-columns: 1fr;
+  }
+
+  .soccer-market-toolbar {
+    grid-template-columns: 1fr;
+  }
+
+  .share-grid,
+  .share-card.kind-parlay .share-grid {
     grid-template-columns: 1fr;
   }
 

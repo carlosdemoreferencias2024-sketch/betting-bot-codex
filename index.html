@@ -10,7 +10,14 @@
     <main class="shell">
       <section class="hero">
         <div>
-          <p class="eyebrow">Futbol · MLB · NBA</p>
+          <div class="hero-brandmark">
+            <img src="assets/branding/mr_bushido_logo_version_oscura.png" alt="Mr. Bushido Tipster" />
+            <div>
+              <p class="eyebrow">Mr. Bushido Tipster</p>
+              <strong>Analisis, disciplina y valor real</strong>
+            </div>
+          </div>
+          <p class="eyebrow">Futbol | MLB | NBA</p>
           <h1>Bot de Pronosticos Deportivos</h1>
           <p class="lede">
             Analiza partidos, calcula probabilidades y entrega tips con nivel de confianza usando datos gratuitos y un modelo simple ajustable.
@@ -68,7 +75,7 @@
         </label>
 
         <button id="loadBtn" type="button">
-          <span aria-hidden="true">↻</span>
+          <span aria-hidden="true">+</span>
           Generar tips
         </button>
       </section>
@@ -646,6 +653,62 @@
           <div class="mini-board">
             <div class="section-head">
               <div>
+                <p class="eyebrow">Futbol</p>
+                <h2>Rendimiento por liga</h2>
+              </div>
+            </div>
+            <div id="auditSoccerLeagueBreakdown" class="breakdown-list"></div>
+          </div>
+
+          <div class="mini-board">
+            <div class="section-head">
+              <div>
+                <p class="eyebrow">MLB</p>
+                <h2>Yield por mercado</h2>
+              </div>
+            </div>
+            <div id="auditMlbMarketBreakdown" class="breakdown-list"></div>
+          </div>
+        </div>
+
+        <div class="history-breakdowns">
+          <div class="mini-board">
+            <div class="section-head">
+              <div>
+                <p class="eyebrow">Realidad</p>
+                <h2>Real vs mixto vs estimado</h2>
+              </div>
+            </div>
+            <div id="auditRealityBreakdown" class="breakdown-list"></div>
+          </div>
+
+          <div class="mini-board">
+            <div class="section-head">
+              <div>
+                <p class="eyebrow">CLV</p>
+                <h2>Por realidad del pick</h2>
+              </div>
+            </div>
+            <div id="auditRealityClvBreakdown" class="breakdown-list"></div>
+          </div>
+        </div>
+
+        <div class="history-breakdowns">
+          <div class="mini-board">
+            <div class="section-head">
+              <div>
+                <p class="eyebrow">Drawdown</p>
+                <h2>Por mercado</h2>
+              </div>
+            </div>
+            <div id="auditMarketDrawdownBreakdown" class="breakdown-list"></div>
+          </div>
+        </div>
+
+        <div class="history-breakdowns">
+          <div class="mini-board">
+            <div class="section-head">
+              <div>
                 <p class="eyebrow">No bet</p>
                 <h2>Auditoria del freno</h2>
               </div>
@@ -681,7 +744,7 @@
             <div class="section-head">
               <div>
                 <p class="eyebrow">Detalle</p>
-                <h2>Texto listo</h2>
+                <h2>Caption automatico</h2>
               </div>
             </div>
             <div id="shareImageMeta" class="alerts-list"></div>
@@ -855,6 +918,51 @@
             </div>
             <span id="sourceBadge" class="badge">Vista principal</span>
           </div>
+          <div id="picksOverview" class="picks-overview">
+            <article>
+              <span>Fuente</span>
+              <strong id="picksOverviewSource">-</strong>
+              <p id="picksOverviewSourceDetail">Sin diagnostico</p>
+            </article>
+            <article>
+              <span>Liga</span>
+              <strong id="picksOverviewLeague">-</strong>
+              <p id="picksOverviewLeagueDetail">Sin seleccion</p>
+            </article>
+            <article>
+              <span>Estado</span>
+              <strong id="picksOverviewState">-</strong>
+              <p id="picksOverviewStateDetail">Esperando corrida</p>
+            </article>
+          </div>
+          <div class="alert-meta picks-transparency-legend">
+            <div><strong>Real:</strong> partido y cuota confirmados.</div>
+            <div><strong>Mixto:</strong> mezcla mercado real con contexto/modelo parcial.</div>
+            <div><strong>Estimado:</strong> se apoya en modelo o fallback.</div>
+          </div>
+          <div id="soccerMarketToolbar" class="soccer-market-toolbar" hidden>
+            <label>
+              Vista futbol
+              <select id="soccerViewModeSelect">
+                <option value="summary" selected>Resumen por partido</option>
+                <option value="flat">Vista plana por mercado</option>
+              </select>
+            </label>
+            <label>
+              Rol
+              <select id="soccerMarketRoleSelect">
+                <option value="all" selected>Todos</option>
+                <option value="principal">Principal</option>
+                <option value="coverage">Cobertura</option>
+                <option value="value">Valor</option>
+              </select>
+            </label>
+            <label>
+              Umbral conf.
+              <input id="soccerMarketThresholdInput" type="number" min="45" max="90" step="1" value="58" />
+            </label>
+          </div>
+          <div id="soccerLeagueQuickFilter" class="top-tabs soccer-league-filter" hidden></div>
           <div id="tipsList" class="tips-list"></div>
         </div>
 
