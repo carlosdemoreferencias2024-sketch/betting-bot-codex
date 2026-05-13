@@ -4336,6 +4336,50 @@ function soccerPoolDeduped(tips = []) {
   });
 }
 
+function soccerParlayCompatibleLeg(existingTip, nextTip) {
+  if (!existingTip || !nextTip) return true;
+  if (existingTip?.game?.sport !== "soccer" || nextTip?.game?.sport !== "soccer") return true;
+  if (gameKey(existingTip) !== gameKey(nextTip)) return true;
+
+  const familyA = marketFamilyMeta(existingTip).key;
+  const familyB = marketFamilyMeta(nextTip).key;
+  if (familyA === familyB) return false;
+
+  const storyA = window.BotTipEngine?.tipStoryKey ? window.BotTipEngine.tipStoryKey(existingTip) : `${familyA}|${existingTip.pick}`;
+  const storyB = window.BotTipEngine?.tipStoryKey ? window.BotTipEngine.tipStoryKey(nextTip) : `${familyB}|${nextTip.pick}`;
+  if (storyA === storyB) return false;
+
+  const typeA = String(existingTip.type || "").toLowerCase();
+  const typeB = String(nextTip.type || "").toLowerCase();
+  const pickA = String(existingTip.pick || "").toLowerCase();
+  const pickB = String(nextTip.pick || "").toLowerCase();
+
+  if ((typeA.includes("ambos anotan") && typeB.includes("over/under")) || (typeB.includes("ambos anotan") && typeA.includes("over/under"))) {
+    if ((pickA.includes("no") || pickB.includes("no")) && (pickA.includes("over") || pickB.includes("over"))) return false;
+  }
+
+  return true;
+}
+
+function selectParlayLegSet(tips = [], profile = {}) {
+  const selected = [];
+  const perGameCounts = new Map();
+
+  for (const tip of tips) {
+    const key = gameKey(tip);
+    const currentCount = perGameCounts.get(key) || 0;
+    const sameGameLegs = selected.filter((item) => gameKey(item) === key);
+    const maxPerGame = tip?.game?.sport === "soccer" ? 2 : 1;
+    if (currentCount >= maxPerGame) continue;
+    if (sameGameLegs.length && !sameGameLegs.every((item) => soccerParlayCompatibleLeg(item, tip))) continue;
+    selected.push(tip);
+    perGameCounts.set(key, currentCount + 1);
+    if (selected.length >= Number(profile.legs || selected.length)) break;
+  }
+
+  return selected;
+}
+
 function slateParlayMarketPriority(tip) {
   const type = String(tip?.type || "").toLowerCase();
   const family = marketFamilyMeta(tip).key;
@@ -4487,7 +4531,7 @@ function selectSlateParlayLegs(tips, profile) {
     .filter((tip) => trustScoreForTip(tip) >= Number(profile.minTrust || 0))
     .filter((tip) => Number(tip.odds || 0) <= Number(profile.maxLegOdds || 99))
     .filter((tip) => !profile.avoidProps || marketFamilyMeta(tip).key !== "props");
-  let legs = uniqueByGame(eligible).slice(0, profile.legs);
+  let legs = selectParlayLegSet(eligible, profile);
 
   if (legs.length < profile.minLegs) {
     const relaxed = profile.sorter(tips)
@@ -4495,7 +4539,7 @@ function selectSlateParlayLegs(tips, profile) {
       .filter((tip) => !profile.allowTip || profile.allowTip(tip))
       .filter((tip) => Number(tip.confidence || 0) >= Math.max(45, Number(profile.minConfidence || 0) - 6))
       .filter((tip) => Number(tip.odds || 0) <= Number(profile.maxLegOdds || 99) + 0.2);
-    legs = uniqueByGame(relaxed).slice(0, profile.minLegs);
+    legs = selectParlayLegSet(relaxed, { ...profile, legs: profile.minLegs });
   }
 
   return legs;
@@ -4605,7 +4649,7 @@ function buildSlateParlays(primaryTips = [], candidateTips = []) {
         composition: profile.name === "Parlay Loteria" ? lotteryCompositionSummary(legs) : null,
         sportMix: profile.name === "Parlay Loteria" ? lotterySportSummary(legs) : null,
         scopeLabel: soccerScoped ? soccerScopeLabel : "",
-        availableLegs: uniqueByGame(eligibleLegs).length,
+        availableLegs: eligibleLegs.length,
         sourceCount: candidatePool.length,
         note: profile.note,
       };
