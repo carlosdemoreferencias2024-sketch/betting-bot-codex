@@ -4438,68 +4438,140 @@ function lotteryEligibleTip(tip) {
   return false;
 }
 
+function lotteryLegIdentityKey(tip = {}) {
+  if (window.BotTipEngine?.tipStoryKey) {
+    return window.BotTipEngine.tipStoryKey(tip);
+  }
+  return `${gameKey(tip)}|${String(tip.type || "")}|${String(tip.pick || "")}|${String(tip.marketKey || "")}`;
+}
+
+function lotteryBucketThresholdsForSport(sport) {
+  if (sport === "soccer") {
+    return {
+      conservative: { confidence: 52, odds: 1.48, ev: 1.2 },
+      value: { confidence: 47, odds: 1.58, ev: 2.5 },
+      aggressive: { confidence: 43, odds: 1.6, ev: 0.8 },
+    };
+  }
+
+  return {
+    conservative: { confidence: 56, odds: 1.45, ev: 1.5 },
+    value: { confidence: 51, odds: 1.55, ev: 4 },
+    aggressive: { confidence: 48, odds: 1.6, ev: 1.2 },
+  };
+}
+
+function lotteryRoleTargets(total) {
+  const target = Math.max(0, Number(total || 0));
+  const conservative = Math.min(target, Math.max(0, Math.round(target * 0.7)));
+  const value = Math.min(Math.max(0, target - conservative), Math.max(0, Math.round(target * 0.2)));
+  const aggressive = Math.max(0, target - conservative - value);
+  return { conservative, value, aggressive };
+}
+
+function lotteryLegBucketLabel(tip) {
+  const sport = String(tip?.game?.sport || "");
+  const thresholds = lotteryBucketThresholdsForSport(sport);
+  const odds = Number(tip?.odds || 0);
+  const ev = Number(tip?.ev || 0);
+  const confidence = Number(tip?.confidence || 0);
+  if (
+    confidence >= thresholds.conservative.confidence &&
+    odds <= thresholds.conservative.odds &&
+    ev >= thresholds.conservative.ev
+  ) return "conservative";
+  if (
+    confidence >= thresholds.value.confidence &&
+    odds <= thresholds.value.odds &&
+    ev >= thresholds.value.ev
+  ) return "value";
+  return "aggressive";
+}
+
+function lotterySportTargets(soccerCount, mlbCount, desiredTotal) {
+  const totalAvailable = soccerCount + mlbCount;
+  const totalTarget = Math.min(desiredTotal, totalAvailable);
+  if (!soccerCount) return { soccer: 0, mlb: totalTarget };
+  if (!mlbCount) return { soccer: totalTarget, mlb: 0 };
+
+  const soccerTarget = Math.min(
+    soccerCount,
+    Math.max(2, Math.min(totalTarget - 1, Math.round(totalTarget * 0.4)))
+  );
+  return {
+    soccer: soccerTarget,
+    mlb: Math.max(0, totalTarget - soccerTarget),
+  };
+}
+
+function pickLotteryLegFromPool(pool = [], state) {
+  for (const tip of pool) {
+    const identityKey = lotteryLegIdentityKey(tip);
+    if (state.usedLegs.has(identityKey)) continue;
+
+    const key = gameKey(tip);
+    const currentCount = state.perGameCounts.get(key) || 0;
+    const sameGameLegs = state.selected.filter((item) => gameKey(item) === key);
+    const maxPerGame = tip?.game?.sport === "soccer" ? 2 : 1;
+    if (currentCount >= maxPerGame) continue;
+    if (sameGameLegs.length && !sameGameLegs.every((item) => soccerParlayCompatibleLeg(item, tip))) continue;
+
+    state.usedLegs.add(identityKey);
+    state.selected.push(tip);
+    state.perGameCounts.set(key, currentCount + 1);
+    return true;
+  }
+  return false;
+}
+
+function allocateLotteryLegsByTargets(pool = [], targetCount, state) {
+  if (!targetCount) return;
+  const bucketTargets = lotteryRoleTargets(targetCount);
+  const bucketOrder = ["conservative", "value", "aggressive"];
+  const buckets = {
+    conservative: pool.filter((tip) => lotteryLegBucketLabel(tip) === "conservative"),
+    value: pool.filter((tip) => lotteryLegBucketLabel(tip) === "value"),
+    aggressive: pool.filter((tip) => lotteryLegBucketLabel(tip) === "aggressive"),
+  };
+
+  bucketOrder.forEach((bucket) => {
+    let remaining = bucketTargets[bucket];
+    while (remaining > 0 && pickLotteryLegFromPool(buckets[bucket], state)) {
+      remaining -= 1;
+    }
+  });
+}
+
 function buildLotteryParlayLegs(tips, profile) {
   const filtered = profile.sorter(tips)
     .filter((tip) => (!profile.allowedSports || profile.allowedSports.includes(tip?.game?.sport)))
     .filter((tip) => (!profile.allowTip || profile.allowTip(tip)));
+  const deduped = window.BotTipEngine?.dedupeTipsByStory
+    ? window.BotTipEngine.dedupeTipsByStory(filtered, { maxPerStory: 1 })
+    : filtered;
 
-  const conservative = uniqueByGame(filtered.filter((tip) =>
-    Number(tip.confidence || 0) >= 56 &&
-    Number(tip.odds || 0) <= 1.45 &&
-    Number(tip.ev || 0) >= 1.5
-  ));
-  const value = uniqueByGame(filtered.filter((tip) =>
-    Number(tip.confidence || 0) >= 51 &&
-    Number(tip.odds || 0) <= 1.55 &&
-    Number(tip.ev || 0) >= 4
-  ));
-  const aggressive = uniqueByGame(filtered.filter((tip) =>
-    Number(tip.confidence || 0) >= 48 &&
-    Number(tip.odds || 0) <= 1.6 &&
-    Number(tip.ev || 0) >= 1.2
-  ));
-
-  const desiredConservative = Math.max(8, Math.round(profile.legs * 0.7));
-  const desiredValue = Math.max(2, Math.round(profile.legs * 0.2));
-  const desiredAggressive = Math.max(1, profile.legs - desiredConservative - desiredValue);
-
-  const usedGames = new Set();
-  const pickFromBucket = (bucket, amount) => {
-    const legs = [];
-    for (const tip of bucket) {
-      const key = gameKey(tip);
-      if (usedGames.has(key)) continue;
-      usedGames.add(key);
-      legs.push(tip);
-      if (legs.length >= amount) break;
-    }
-    return legs;
+  const soccerPool = deduped.filter((tip) => tip?.game?.sport === "soccer");
+  const mlbPool = deduped.filter((tip) => tip?.game?.sport === "mlb");
+  const targets = lotterySportTargets(soccerPool.length, mlbPool.length, Number(profile.legs || 0));
+  const state = {
+    selected: [],
+    usedLegs: new Set(),
+    perGameCounts: new Map(),
   };
 
-  let legs = [
-    ...pickFromBucket(conservative, desiredConservative),
-    ...pickFromBucket(value, desiredValue),
-    ...pickFromBucket(aggressive, desiredAggressive),
-  ];
+  allocateLotteryLegsByTargets(soccerPool, targets.soccer, state);
+  allocateLotteryLegsByTargets(mlbPool, targets.mlb, state);
 
-  if (legs.length < profile.minLegs) {
-    const fallback = uniqueByGame(filtered).filter((tip) => !usedGames.has(gameKey(tip)));
-    for (const tip of fallback) {
-      legs.push(tip);
-      if (legs.length >= profile.minLegs) break;
-    }
+  const combinedFallback = [
+    ...soccerPool,
+    ...mlbPool,
+  ];
+  const relaxedTarget = Math.min(Number(profile.legs || 0), deduped.length);
+  while (state.selected.length < relaxedTarget && pickLotteryLegFromPool(combinedFallback, state)) {
+    // intentional: keep filling with the best remaining compatible legs
   }
 
-  return legs.slice(0, profile.legs);
-}
-
-function lotteryLegBucketLabel(tip) {
-  const odds = Number(tip?.odds || 0);
-  const ev = Number(tip?.ev || 0);
-  const confidence = Number(tip?.confidence || 0);
-  if (confidence >= 56 && odds <= 1.45 && ev >= 1.5) return "conservative";
-  if (confidence >= 51 && odds <= 1.55 && ev >= 4) return "value";
-  return "aggressive";
+  return state.selected.slice(0, profile.legs);
 }
 
 function lotteryCompositionSummary(legs = []) {
@@ -4517,6 +4589,15 @@ function lotterySportSummary(legs = []) {
     if (sport === "mlb") summary.mlb += 1;
     return summary;
   }, { soccer: 0, mlb: 0 });
+}
+
+function lotteryBadgesForLegs(legs = []) {
+  const mix = lotterySportSummary(legs);
+  const badges = ["Multiliga"];
+  if (mix.soccer && mix.mlb) badges.push("Futbol + MLB");
+  else if (mix.soccer) badges.push("Solo Futbol");
+  else if (mix.mlb) badges.push("Solo MLB");
+  return badges;
 }
 
 function selectSlateParlayLegs(tips, profile) {
@@ -4645,7 +4726,7 @@ function buildSlateParlays(primaryTips = [], candidateTips = []) {
         odds: legs.reduce((product, tip) => product * estimateDecimalOdds(tip, profile), 1),
         hitRate: legs.reduce((product, tip) => product * (tip.confidence / 100), 1) * 100,
         criteria: legs.map((tip) => `${tip.type}: ${tip.pick} · ${(tip.reason || trustLabelForTip(tip)).split(". ").slice(0, 1).join("")}`),
-        badges: profile.name === "Parlay Loteria" ? ["Multiliga", "Futbol + MLB"] : [],
+        badges: profile.name === "Parlay Loteria" ? lotteryBadgesForLegs(legs) : [],
         composition: profile.name === "Parlay Loteria" ? lotteryCompositionSummary(legs) : null,
         sportMix: profile.name === "Parlay Loteria" ? lotterySportSummary(legs) : null,
         scopeLabel: soccerScoped ? soccerScopeLabel : "",
