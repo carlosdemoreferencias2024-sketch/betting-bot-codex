@@ -3650,6 +3650,10 @@ function isRealTip(tip) {
   );
 }
 
+function isEstimatedTip(tip) {
+  return pickRealityMeta(tip).key === "estimated";
+}
+
 function pickRealityMeta(tip) {
   const realGame = isRealGame(tip?.game);
   const realOdds = Boolean(tip?.oddsSource === "Real" && tip?.bookmaker && tip.bookmaker !== "Bot");
@@ -4134,6 +4138,12 @@ function passesValueFilters(tip, seen = new Set(), options = {}) {
   if (tip.oddsAgeState === "old") return reject("odds viejas");
   seen.add(key);
   return { passed: true, reason: "" };
+}
+
+function bumpRejectReasons(reasons = {}, verdict = {}) {
+  if (!verdict || verdict.passed || !verdict.reason) return reasons;
+  reasons[verdict.reason] = (reasons[verdict.reason] || 0) + 1;
+  return reasons;
 }
 
 function createOdds(tip) {
@@ -8611,8 +8621,8 @@ async function run() {
         const fallbackEvaluated = fallbackTips.map((tip) => ({ tip, verdict: passesValueFilters(tip, seenFallbackValueKeys, { strongOnly: settings.evStrongOnly }) }));
         rawEvaluated.forEach(({ verdict }) => bumpRejectReasons(rejectReasons, verdict));
         fallbackEvaluated.forEach(({ verdict }) => bumpRejectReasons(rejectReasons, verdict));
-        const passedRawTips = rawEvaluated.filter(({ verdict }) => verdict.ok).map(({ tip }) => tip);
-        const passedFallbackTips = fallbackEvaluated.filter(({ verdict }) => verdict.ok).map(({ tip }) => tip);
+        const passedRawTips = rawEvaluated.filter(({ verdict }) => verdict.passed).map(({ tip }) => tip);
+        const passedFallbackTips = fallbackEvaluated.filter(({ verdict }) => verdict.passed).map(({ tip }) => tip);
         const tips = rescueTipsIfEmpty(ensureSafePicks(passedRawTips, passedFallbackTips), settings.realOnly ? mixedFallbackTips : fallbackTips);
         window.__lastRenderedTips = tips;
         cacheRealTopTips(tips, dataPackage);
