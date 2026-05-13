@@ -418,6 +418,10 @@ let soccerParlayUniverseCache = { at: 0, cacheKey: "", tips: [] };
 let lotteryParlayUniverseCache = { at: 0, cacheKey: "", tips: [] };
 let currentMarketEventId = "";
 let currentMarketFamily = "main";
+const LOG_SUMMARY_ORDER = ["winner", "layers", "engine", "ready", "cache", "demo", "paper", "slate", "boot", "app"];
+const LOG_MAX_RECENTS = 6;
+const LOG_MAX_AGGREGATES = 6;
+let logState = createLogState();
 const workMode = new URLSearchParams(window.location.search).get("workmode") === "1";
 const ALL_SOCCER_LEAGUES_ID = "__all_soccer__";
 const ALL_SOCCER_LEAGUES_META = {
@@ -576,10 +580,119 @@ function setSectionUsefulness(ariaLabel, visible) {
   section.hidden = !matchesView || !visible;
 }
 
+function createLogState() {
+  return {
+    summaries: new Map(),
+    aggregates: new Map(),
+    recents: [],
+    order: 0,
+  };
+}
+
+function resetLogFeed() {
+  logState = createLogState();
+  renderLogFeed();
+}
+
+function logAggregateMeta(message) {
+  const aggregateMatchers = [
+    { test: /^Odds fallback:/i, key: "odds-fallback", label: "Odds fallback", tone: "warn" },
+    { test: /^Fixtures fallback:/i, key: "fixtures-fallback", label: "Fixtures fallback", tone: "warn" },
+    { test: /^External fallback:/i, key: "external-fallback", label: "External fallback", tone: "warn" },
+    { test: /^The Odds API no disponible/i, key: "odds-api-down", label: "The Odds API sin respuesta", tone: "warn" },
+    { test: /^Sports API Pro no disponible/i, key: "sports-api-pro-down", label: "Sports API Pro sin respuesta", tone: "warn" },
+    { test: /^Sports API Pro no respondio/i, key: "sports-api-pro-timeout", label: "Sports API Pro timeout", tone: "warn" },
+    { test: /^TheRundown no disponible/i, key: "therundown-down", label: "TheRundown degradado", tone: "warn" },
+    { test: /^No se pudo cargar fuente secundaria para validacion/i, key: "secondary-validation-down", label: "Validacion secundaria no disponible", tone: "warn" },
+    { test: /^Referencias externas no disponibles/i, key: "external-references-down", label: "Referencias externas no disponibles", tone: "warn" },
+    { test: /^Fixtures [^:]+:/i, key: "fixtures-league", label: "Fixtures por liga", tone: "info" },
+    { test: /^Odds [^:]+:/i, key: "odds-league", label: "Odds por liga", tone: "info" },
+    { test: /^External [^:]+:/i, key: "external-league", label: "Referencias por liga", tone: "info" },
+  ];
+  return aggregateMatchers.find((matcher) => matcher.test.test(message)) || null;
+}
+
+function classifyLogMessage(message) {
+  if (message.startsWith("Fuente ganadora:")) return { slot: "winner", tone: "good" };
+  if (message.startsWith("Capas:")) return { slot: "layers", tone: /FALLBACK|CACHE/.test(message) ? "warn" : "good" };
+  if (message.startsWith("Motor")) return { slot: "engine", tone: "info" };
+  if (message.startsWith("Listo")) return { slot: "ready", tone: "good" };
+  if (message.startsWith("Resumen demo:")) return { slot: "ready", tone: "warn" };
+  if (message.startsWith("Cache local:")) return { slot: "cache", tone: "warn" };
+  if (message.startsWith("No se pudo conectar con la API.")) return { slot: "demo", tone: "warn" };
+  if (message.startsWith("Paper trading:")) return { slot: "paper", tone: "info" };
+  if (message.startsWith("Slate corto")) return { slot: "slate", tone: "info" };
+  if (message.startsWith("Arranque estable:")) return { slot: "boot", tone: "info" };
+  if (message.startsWith("App iniciada.")) return { slot: "app", tone: "info" };
+  const aggregate = logAggregateMeta(message);
+  if (aggregate) return { aggregate, tone: aggregate.tone };
+  return { tone: /no se pudo|fallo|error|fallback|demo/i.test(message) ? "warn" : "info" };
+}
+
+function pushRecentLog(entry) {
+  const duplicateIndex = logState.recents.findIndex((item) => item.message === entry.message);
+  if (duplicateIndex === 0) {
+    logState.recents[0] = entry;
+    return;
+  }
+  if (duplicateIndex > 0) {
+    logState.recents.splice(duplicateIndex, 1);
+  }
+  logState.recents.unshift(entry);
+  logState.recents = logState.recents.slice(0, LOG_MAX_RECENTS);
+}
+
+function renderLogEntry(entry) {
+  const classes = ["log-entry"];
+  if (entry.tone) classes.push(`log-${entry.tone}`);
+  if (entry.kind === "aggregate") classes.push("log-aggregate");
+  return `<p class="${classes.join(" ")}">${entry.message}</p>`;
+}
+
+function renderLogFeed() {
+  const summaryEntries = LOG_SUMMARY_ORDER
+    .map((slot) => logState.summaries.get(slot))
+    .filter(Boolean);
+  const aggregateEntries = [...logState.aggregates.values()]
+    .sort((a, b) => b.order - a.order)
+    .slice(0, LOG_MAX_AGGREGATES)
+    .map((entry) => ({
+      ...entry,
+      kind: "aggregate",
+      message: `${entry.label} x${entry.count}`,
+    }));
+  const entries = [...summaryEntries, ...aggregateEntries, ...logState.recents];
+  if (!entries.length) {
+    els.log.innerHTML = `<p class="log-entry log-info">Esperando la siguiente corrida.</p>`;
+    return;
+  }
+  els.log.innerHTML = entries.map(renderLogEntry).join("");
+}
+
 function log(message) {
-  const line = document.createElement("p");
-  line.textContent = message;
-  els.log.prepend(line);
+  const normalized = String(message || "").trim();
+  if (!normalized) return;
+  const meta = classifyLogMessage(normalized);
+  const order = ++logState.order;
+  if (meta.aggregate) {
+    const current = logState.aggregates.get(meta.aggregate.key) || { ...meta.aggregate, count: 0, order: 0 };
+    current.count += 1;
+    current.order = order;
+    logState.aggregates.set(meta.aggregate.key, current);
+    renderLogFeed();
+    return;
+  }
+  const entry = {
+    message: normalized,
+    tone: meta.tone || "info",
+    order,
+  };
+  if (meta.slot) {
+    logState.summaries.set(meta.slot, entry);
+  } else {
+    pushRecentLog(entry);
+  }
+  renderLogFeed();
 }
 
 function setLoading(isLoading) {
@@ -990,6 +1103,14 @@ async function fetchBackendPicksPackage(sport, leagueId) {
     throw new Error(`Backend picks respondio ${response.status}`);
   }
   return response.json();
+}
+
+async function fetchBackendUnifiedDataPackage({ sport, leagueId, apiChoice, allSoccer = false }) {
+  if (!window.BotDataLayers?.fetchUnifiedDataPackage) {
+    throw new Error("BotDataLayers no esta disponible");
+  }
+  const payload = await window.BotDataLayers.fetchUnifiedDataPackage({ sport, leagueId, apiChoice, allSoccer });
+  return window.BotDataLayers.adaptBackendDataPackage(payload, { buildFormBook, buildScheduleContext });
 }
 
 function selectedSoccerParlayScope() {
@@ -1808,6 +1929,7 @@ function renderBackendActivity() {
   const metrics = latestBackendMetrics || [];
   const logs = latestBackendLogs || [];
   const summary = summarizeBackendValue(metrics);
+  const backendView = window.BotViews?.backend;
 
   els.backendActivityBadge.textContent = metrics.length || logs.length
     ? `${summary.items.length} focos activos`
@@ -1829,40 +1951,48 @@ function renderBackendActivity() {
       grouped[key].total += Number(entry.value) || 0;
       if (!grouped[key].lastAt || String(entry.at || "") > grouped[key].lastAt) grouped[key].lastAt = entry.at;
     });
-    els.backendMetricsPanel.innerHTML = Object.values(grouped)
-      .sort((a, b) => String(b.lastAt || "").localeCompare(String(a.lastAt || "")))
-      .slice(0, 10)
-      .map((item) => `
-        <div class="alert-item">
-          <strong>${backendActionLabel(item.action)}</strong>
-          <span>${item.count} evento(s)</span>
-          <div>Total ${item.total} · Ultimo ${formatBackendStamp(item.lastAt)}</div>
-        </div>
-      `).join("");
+    const groupedItems = Object.values(grouped);
+    els.backendMetricsPanel.innerHTML = backendView?.buildBackendMetricsMarkup
+      ? backendView.buildBackendMetricsMarkup(groupedItems, backendActionLabel, formatBackendStamp)
+      : groupedItems
+        .sort((a, b) => String(b.lastAt || "").localeCompare(String(a.lastAt || "")))
+        .slice(0, 10)
+        .map((item) => `
+          <div class="alert-item">
+            <strong>${backendActionLabel(item.action)}</strong>
+            <span>${item.count} evento(s)</span>
+            <div>Total ${item.total} · Ultimo ${formatBackendStamp(item.lastAt)}</div>
+          </div>
+        `).join("");
 
-    els.backendValuePanel.innerHTML = summary.items.length
-      ? summary.items.map((item) => `
-        <div class="alert-item">
-          <strong>${backendActionLabel(item.action)}</strong>
-          <span>Impacto ${item.impact}</span>
-          <div>${item.count} corrida(s) · Ultimo ${formatBackendStamp(item.lastAt)}</div>
-        </div>
-      `).join("")
-      : `<div class="empty">Todavia no hay impacto medible en jobs backend.</div>`;
+    els.backendValuePanel.innerHTML = backendView?.buildBackendValueMarkup
+      ? backendView.buildBackendValueMarkup(summary.items, backendActionLabel, formatBackendStamp)
+      : summary.items.length
+        ? summary.items.map((item) => `
+          <div class="alert-item">
+            <strong>${backendActionLabel(item.action)}</strong>
+            <span>Impacto ${item.impact}</span>
+            <div>${item.count} corrida(s) · Ultimo ${formatBackendStamp(item.lastAt)}</div>
+          </div>
+        `).join("")
+        : `<div class="empty">Todavia no hay impacto medible en jobs backend.</div>`;
   }
 
-  els.backendLogsPanel.innerHTML = logs.length
-    ? logs.slice(0, 18).map((entry) => `
-      <div class="alert-item ${backendLogTone(entry.kind)}">
-        <strong>${entry.action || "backend"}</strong>
-        <span>${formatBackendStamp(entry.at)}</span>
-        <div>${entry.detail || "Sin detalle"}</div>
-      </div>
-    `).join("")
-    : `<div class="empty">Todavia no hay logs backend recientes.</div>`;
+  els.backendLogsPanel.innerHTML = backendView?.buildBackendLogsMarkup
+    ? backendView.buildBackendLogsMarkup(logs, backendLogTone, formatBackendStamp)
+    : logs.length
+      ? logs.slice(0, 18).map((entry) => `
+        <div class="alert-item ${backendLogTone(entry.kind)}">
+          <strong>${entry.action || "backend"}</strong>
+          <span>${formatBackendStamp(entry.at)}</span>
+          <div>${entry.detail || "Sin detalle"}</div>
+        </div>
+      `).join("")
+      : `<div class="empty">Todavia no hay logs backend recientes.</div>`;
 }
 
 function renderDailyOps(tips = []) {
+  const opsView = window.BotViews?.ops;
   const targetDate = currentCalendarDate || isoToday();
   const slateTips = (tips || []).filter((tip) => tip.game?.date === targetDate);
   const realSlateTips = slateTips.filter((tip) => isRealTip(tip));
@@ -1886,77 +2016,35 @@ function renderDailyOps(tips = []) {
   els.dailyNextRun.textContent = nextBackendRunLabel();
 
   const backend = latestBackendStatus || {};
-  const opsCards = [
-    `
-      <article class="alert-card">
-        <div class="alert-top">
-          <strong>Estado del dia</strong>
-          <span>${digestReady ? "Digest listo" : "Digest flojo"}</span>
-        </div>
-        <div class="alert-meta">
-          <div>Slate ${targetDate} · ${slateTips.length} pick(s) · ${realSlateTips.length} real(es).</div>
-          <div>${digestReady ? "Ya hay material para digest multideporte." : "Todavia falta profundidad para digest fuerte."}</div>
-        </div>
-      </article>
-    `,
-    `
-      <article class="alert-card">
-        <div class="alert-top">
-          <strong>Backend</strong>
-          <span>${backend.ok ? "OK" : "Base"}</span>
-        </div>
-        <div class="alert-meta">
-          <div>Picks backend: ${formatBackendStamp(backend.lastBackendPicksAt)} · Stats: ${formatBackendStamp(backend.lastStatsSnapshotAt)}</div>
-          <div>Telegram: ${backend.hasTelegram ? "configurado" : "sin configurar"} · Ultimo envio: ${formatBackendStamp(backend.lastTelegramSentAt)}</div>
-          <div>Proxima corrida estimada: ${nextBackendRunLabel(backend)}</div>
-        </div>
-      </article>
-    `,
-    `
-      <article class="alert-card">
-        <div class="alert-top">
-          <strong>Proxima accion</strong>
-          <span>Runbook</span>
-        </div>
-        <div class="alert-meta">
-          <div>1. Revisa top real del slate.</div>
-          <div>2. Si hay 2+ deportes activos, manda digest. 3. Si el real slate es corto, baja volumen o espera nueva corrida.</div>
-        </div>
-      </article>
-    `,
-  ];
-
-  els.dailyOpsPanel.innerHTML = opsCards.join("");
+  els.dailyOpsPanel.innerHTML = opsView?.buildDailyOpsCards
+    ? opsView.buildDailyOpsCards({
+      digestReady,
+      targetDate,
+      slateTipsCount: slateTips.length,
+      realSlateTipsCount: realSlateTips.length,
+      backendStatus: {
+        ok: backend.ok,
+        hasTelegram: backend.hasTelegram,
+        lastBackendPicksAt: formatBackendStamp(backend.lastBackendPicksAt),
+        lastStatsSnapshotAt: formatBackendStamp(backend.lastStatsSnapshotAt),
+        lastTelegramSentAt: formatBackendStamp(backend.lastTelegramSentAt),
+      },
+      nextRunLabel: nextBackendRunLabel(backend),
+    })
+    : "";
 
   if (!activeSports.length) {
     els.dailySportOpsList.innerHTML = `<div class="empty">Todavia no hay tops diarios suficientes por deporte.</div>`;
     return;
   }
 
-  els.dailySportOpsList.innerHTML = activeSports.map((sport) => {
-    const tip = topBySport[sport];
-    const match = tip.match || `${tip.game?.away} @ ${tip.game?.home}`;
-    const league = tip.leagueName || sportProfiles[sport]?.apiName || sport;
-    const consensus = tip.consensusConfidence ?? tip.confidence ?? 0;
-    const odds = Number(tip.odds || 0).toFixed(2);
-    const book = tip.bookmaker || "Bot";
-    return `
-      <article class="alert-card">
-        <div class="alert-top">
-          <strong>${sportProfiles[sport]?.apiName || sport}</strong>
-          <span>${toPercent(consensus)}</span>
-        </div>
-        <div class="alert-meta">
-          <div>${tip.type}: ${tip.pick}</div>
-          <div>${match} · ${league}</div>
-          <div>${book} ${odds}x · EV ${tip.ev > 0 ? "+" : ""}${tip.ev}%</div>
-        </div>
-      </article>
-    `;
-  }).join("");
+  els.dailySportOpsList.innerHTML = opsView?.buildDailySportOpsMarkup
+    ? opsView.buildDailySportOpsMarkup({ activeSports, topBySport, sportProfiles, toPercent })
+    : "";
 }
 
 function renderExecutiveDashboard(tips = []) {
+  const opsView = window.BotViews?.ops;
   const ranked = rankRealTopTips(tips);
   const top = ranked[0] || tips[0] || null;
   const shortlist = ranked.slice(0, 3);
@@ -1969,120 +2057,101 @@ function renderExecutiveDashboard(tips = []) {
   const confidencePackage = effectiveMinConfidence(tips);
 
   if (!top) {
-    els.executiveHeroCard.innerHTML = `<div class="empty">Todavia no hay un pick premium para destacar.</div>`;
-    els.executiveTopPick.innerHTML = `<div class="empty">Todavia no hay un pick fuerte para destacar.</div>`;
-    els.executiveHeroHighlights.innerHTML = "";
+    const emptyState = opsView?.buildExecutiveEmptyState?.() || {};
+    els.executiveHeroCard.innerHTML = emptyState.hero || `<div class="empty">Todavia no hay un pick premium para destacar.</div>`;
+    els.executiveTopPick.innerHTML = emptyState.topPick || `<div class="empty">Todavia no hay un pick fuerte para destacar.</div>`;
+    els.executiveHeroHighlights.innerHTML = emptyState.highlights || "";
   } else {
     const competition = competitionClassMeta(top);
     const grade = recommendationGradeMeta(top);
     const heroMlbSplit = mlbSplitBadgeMeta(top.game);
-    els.executiveHeroCard.innerHTML = `
-      <article class="executive-hero">
-        <div class="executive-hero-top">
-          <span class="executive-hero-label">Mejor oportunidad del slate</span>
-          <div class="executive-hero-badges">
-            <span class="grade-pill ${grade.key}">${grade.grade}</span>
-            <span class="trust-pill ${trustTierForTip(top)}">${trustLabelForTip(top)}</span>
-          </div>
-        </div>
-        <div class="executive-hero-body">
-          <div>
-            <p class="match executive-hero-match">${top.game.away} @ ${top.game.home}</p>
-            <p class="executive-hero-pick"><strong>${top.type}:</strong> ${top.pick}</p>
-            <p class="alert-meta">${top.leagueName || sportProfiles[top.game.sport]?.apiName || top.game.sport} · ${competition.label} · ${pickRealityMeta(top).detail}</p>
-          </div>
-          <div class="executive-hero-stats">
-            <div class="share-stat"><strong>Cuota</strong><span>${top.bookmaker || "Bot"} ${Number(top.odds || 0).toFixed(2)}x</span></div>
-            <div class="share-stat"><strong>Modelo</strong><span>${toPercent((top.modelProbability || 0) * 100)}</span></div>
-            <div class="share-stat"><strong>EV</strong><span>${top.ev > 0 ? "+" : ""}${top.ev}%</span></div>
-            <div class="share-stat"><strong>Stake</strong><span>${money(top.recommendedStake ?? recommendedStakeForTip(top))}</span></div>
-          </div>
-        </div>
-      </article>
-    `;
-    els.executiveTopPick.innerHTML = `
-      <article class="alert-card">
-        <div class="alert-top">
-          <strong>${top.type}: ${top.pick}</strong>
-          <span class="grade-pill ${grade.key}">${grade.grade}</span>
-        </div>
-      <div class="alert-meta">
-        <div>${top.game.away} @ ${top.game.home}</div>
-        <div>${top.leagueName || sportProfiles[top.game.sport]?.apiName || top.game.sport} · ${competition.label}</div>
-        <div>Modelo ${toPercent((top.modelProbability || 0) * 100)} · EV ${top.ev > 0 ? "+" : ""}${top.ev}% · Stake ${money(top.recommendedStake ?? recommendedStakeForTip(top))}</div>
-        <div>${grade.label} · ${trustLabelForTip(top)} · score ${trustScoreForTip(top)}</div>
-      </div>
-    </article>
-  `;
-    els.executiveHeroHighlights.innerHTML = `
-      <div class="executive-highlight-strip">
-        <span class="pill ${grade.key}">${grade.label}</span>
-        <span class="pill trust-pill ${trustTierForTip(top)}">${trustLabelForTip(top)}</span>
-        <span class="pill">EV ${top.ev > 0 ? "+" : ""}${top.ev}%</span>
-        <span class="pill">Modelo ${toPercent((top.modelProbability || 0) * 100)}</span>
-        <span class="pill">${top.bookmaker} ${Number(top.odds || 0).toFixed(2)}x</span>
-        ${heroMlbSplit ? `<span class="pill mlb-signal ${heroMlbSplit.key}">${heroMlbSplit.label}</span>` : ""}
-      </div>
-    `;
-    els.executiveHeroCard.innerHTML = els.executiveHeroCard.innerHTML
-      .replace(pickRealityMeta(top).detail, pickRealityMeta(top).label)
-      .replaceAll(" · ", " | ");
-    els.executiveTopPick.innerHTML = els.executiveTopPick.innerHTML.replaceAll(" · ", " | ");
+    const topLeagueLabel = top.leagueName || sportProfiles[top.game.sport]?.apiName || top.game.sport;
+    const reality = pickRealityMeta(top);
+    const trustMeta = { key: trustTierForTip(top), label: trustLabelForTip(top) };
+    const bookmakerLabel = `${top.bookmaker || "Bot"} ${Number(top.odds || 0).toFixed(2)}x`;
+    const modelLabel = toPercent((top.modelProbability || 0) * 100);
+    const evLabel = `${top.ev > 0 ? "+" : ""}${top.ev}%`;
+    const stakeLabel = money(top.recommendedStake ?? recommendedStakeForTip(top));
+    els.executiveHeroCard.innerHTML = opsView?.buildExecutiveHeroMarkup
+      ? opsView.buildExecutiveHeroMarkup({
+        top: { ...top, leagueName: topLeagueLabel },
+        grade,
+        trustLabel: trustMeta,
+        competitionLabel: competition.label,
+        realityLabel: reality.label,
+        bookmakerLabel,
+        modelLabel,
+        evLabel,
+        stakeLabel,
+        splitBadge: heroMlbSplit,
+      })
+      : "";
+    els.executiveTopPick.innerHTML = opsView?.buildExecutiveTopPickMarkup
+      ? opsView.buildExecutiveTopPickMarkup({
+        top: { ...top, leagueName: topLeagueLabel },
+        grade,
+        competitionLabel: competition.label,
+        modelLabel,
+        evLabel,
+        stakeLabel,
+        trustText: trustMeta.label,
+        trustScore: trustScoreForTip(top),
+      })
+      : "";
+    els.executiveHeroHighlights.innerHTML = opsView?.buildExecutiveHighlightsMarkup
+      ? opsView.buildExecutiveHighlightsMarkup({
+        gradeLabel: grade.label,
+        trustText: trustMeta.label,
+        evLabel,
+        modelLabel,
+        bookmakerLabel,
+        splitBadge: heroMlbSplit,
+      })
+      : "";
   }
 
-  els.executiveSlateState.innerHTML = `
-    <article class="alert-card">
-      <div class="alert-top">
-        <strong>${noBet ? "No apostar hoy" : "Slate activo"}</strong>
-        <span>${targetDate}</span>
-      </div>
-      <div class="alert-meta">
-        <div>${slateTips.length} pick(s) del slate · ${realSlateTips.length} reales.</div>
-        <div>${els.evStrongOnly?.checked ? "Filtro EV fuerte activo." : "Filtro EV normal activo."}</div>
-        <div>Confianza ${confidencePackage.automatic ? "automatica" : "manual"} · corte ${confidencePackage.threshold}%.</div>
-        <div>${Number(els.evRejectedCount?.textContent || 0)} pick(s) rechazados por filtro.</div>
-      </div>
-    </article>
-  `;
-  els.executiveSlateState.innerHTML = els.executiveSlateState.innerHTML
-    .replace(`${slateTips.length} pick(s) del slate · ${realSlateTips.length} reales.`, `${slateTips.length} pick(s) | ${realSlateTips.length} reales | ${Number(els.evValidCount?.textContent || 0)} validos por EV.`)
-    .replace(els.evStrongOnly?.checked ? "Filtro EV fuerte activo." : "Filtro EV normal activo.", els.evStrongOnly?.checked ? "Filtro EV fuerte" : "Filtro EV normal")
-    .replace(`Confianza ${confidencePackage.automatic ? "automatica" : "manual"} · corte ${confidencePackage.threshold}%.`, `Confianza ${confidencePackage.automatic ? "auto" : "manual"} ${confidencePackage.threshold}%.`)
-    .replace(`${Number(els.evRejectedCount?.textContent || 0)} pick(s) rechazados por filtro.`, `${Number(els.evRejectedCount?.textContent || 0)} pick(s) fuera por filtro.`);
+  els.executiveSlateState.innerHTML = opsView?.buildExecutiveSlateStateMarkup
+    ? opsView.buildExecutiveSlateStateMarkup({
+      noBet,
+      targetDate,
+      slateTipsCount: slateTips.length,
+      realSlateTipsCount: realSlateTips.length,
+      evValidCount: Number(els.evValidCount?.textContent || 0),
+      evStrongOnly: Boolean(els.evStrongOnly?.checked),
+      confidenceModeLabel: confidencePackage.automatic ? "auto" : "manual",
+      threshold: confidencePackage.threshold,
+      evRejectedCount: Number(els.evRejectedCount?.textContent || 0),
+    })
+    : "";
 
-  els.executiveBankrollState.innerHTML = `
-    <article class="alert-card">
-      <div class="alert-top">
-        <strong>Banca actual</strong>
-        <span>${money(bankroll)}</span>
-      </div>
-      <div class="alert-meta">
-        <div>ROI ${Number(snapshot.roi || 0).toFixed(1)}% · Win rate ${Number(snapshot.winRate || 0).toFixed(1)}%</div>
-        <div>Profit ${money(Number(snapshot.profit || 0))} · Drawdown ${els.drawdownValue?.textContent || "0%"}</div>
-      </div>
-    </article>
-  `;
+  els.executiveBankrollState.innerHTML = opsView?.buildExecutiveBankrollStateMarkup
+    ? opsView.buildExecutiveBankrollStateMarkup({
+      bankrollLabel: money(bankroll),
+      roiLabel: `${Number(snapshot.roi || 0).toFixed(1)}%`,
+      winRateLabel: `${Number(snapshot.winRate || 0).toFixed(1)}%`,
+      profitLabel: money(Number(snapshot.profit || 0)),
+      drawdownLabel: els.drawdownValue?.textContent || "0%",
+    })
+    : "";
 
   if (!shortlist.length) {
     els.executivePulse.innerHTML = "";
     return;
   }
 
-  els.executivePulse.innerHTML = shortlist.map((tip, index) => `
-    <article class="executive-pulse-card">
-      <div class="alert-top">
-        <strong>${index + 1}. ${tip.pick}</strong>
-        <span class="grade-pill ${recommendationGradeMeta(tip).key}">${recommendationGradeMeta(tip).grade}</span>
-      </div>
-      <div class="alert-meta">
-        <div>${tip.game.away} @ ${tip.game.home}</div>
-        <div>${tip.type} · ${trustLabelForTip(tip)} · EV ${tip.ev > 0 ? "+" : ""}${tip.ev}% · Stake ${money(tip.recommendedStake ?? recommendedStakeForTip(tip))}</div>
-      </div>
-    </article>
-  `).join("");
+  els.executivePulse.innerHTML = opsView?.buildExecutivePulseMarkup
+    ? opsView.buildExecutivePulseMarkup({
+      shortlist,
+      recommendationGradeMeta,
+      trustLabelForTip,
+      money,
+      recommendedStakeForTip,
+    })
+    : "";
 }
 
 function renderAutoConfidencePanel(tips = []) {
+  const insightsView = window.BotViews?.insights;
   const packageInfo = effectiveMinConfidence(tips);
   const modeInfo = effectiveBetMode(tips);
   const ranked = [...tips]
@@ -2091,57 +2160,32 @@ function renderAutoConfidencePanel(tips = []) {
 
   if (!ranked.length) {
     els.autoConfidencePanelBadge.textContent = packageInfo.label || "Esperando slate";
-    els.autoConfidencePanel.innerHTML = `
-      <article class="alert-card">
-        <div class="alert-top">
-          <strong>Sin jugadas para recomendar</strong>
-          <span>${packageInfo.threshold}%</span>
-        </div>
-        <div class="alert-meta">
-          <div>${packageInfo.detail}</div>
-          <div>En cuanto entren picks con EV y confianza suficiente, aqui te voy a resumir las mejores.</div>
-        </div>
-      </article>
-    `;
+    els.autoConfidencePanel.innerHTML = insightsView?.buildAutoConfidenceEmptyMarkup
+      ? insightsView.buildAutoConfidenceEmptyMarkup(packageInfo)
+      : "";
     return;
   }
 
   els.autoConfidencePanelBadge.textContent = modeInfo.noBet ? "No bet sugerido" : packageInfo.label || "Auto";
-  els.autoConfidencePanel.innerHTML = [
-    `
-      <article class="alert-card">
-        <div class="alert-top">
-          <strong>${modeInfo.noBet ? "Hoy pisaria el freno" : "Recomendacion automatica"}</strong>
-          <span>${packageInfo.threshold}%</span>
-        </div>
-        <div class="alert-meta">
-          <div>${packageInfo.detail}</div>
-          <div>${modeInfo.reasons?.[0] || "El motor ya esta priorizando valor, confianza y calidad del dato."}</div>
-          <div>${modeInfo.noBet ? "El slate no da para abrir mucho la mano." : `Modo sugerido: ${betModeLabel(modeInfo.mode)}.`}</div>
-        </div>
-      </article>
-    `,
-    ...ranked.map((tip, index) => {
-      const trustScore = trustScoreForTip(tip);
-      const competition = competitionClassMeta(tip);
-      const reality = pickRealityMeta(tip);
-      const grade = recommendationGradeMeta(tip);
-      return `
-        <article class="alert-card">
-          <div class="alert-top">
-            <strong>${index + 1}. ${tip.type}: ${tip.pick}</strong>
-            <span class="grade-pill ${grade.key}">${grade.grade}</span>
-          </div>
-          <div class="alert-meta">
-            <div>${tip.game.away} @ ${tip.game.home} · ${tip.leagueName || sportProfiles[tip.game.sport]?.apiName || tip.game.sport}</div>
-            <div>${reality.label} · ${competition.label} · ${tip.bookmaker} ${Number(tip.odds || 0).toFixed(2)}x</div>
-            <div>${grade.label} · ${trustLabelForTip(tip)} · score ${trustScore}</div>
-            <div>Modelo ${toPercent((tip.modelProbability || 0) * 100)} · EV ${tip.ev > 0 ? "+" : ""}${tip.ev}% · Stake ${money(tip.recommendedStake ?? recommendedStakeForTip(tip))}</div>
-          </div>
-        </article>
-      `;
-    }),
-  ].join("");
+  els.autoConfidencePanel.innerHTML = insightsView?.buildAutoConfidencePanelMarkup
+    ? insightsView.buildAutoConfidencePanelMarkup({
+      packageInfo,
+      modeInfo,
+      ranked,
+      deps: {
+        betModeLabel,
+        trustScoreForTip,
+        competitionClassMeta,
+        pickRealityMeta,
+        recommendationGradeMeta,
+        trustLabelForTip,
+        toPercent,
+        money,
+        recommendedStakeForTip,
+        sportProfiles,
+      },
+    })
+    : "";
 }
 
 function marketFamilyMeta(tip) {
@@ -2517,6 +2561,7 @@ function buildPropMarketEntriesForEvent(event = {}) {
 }
 
 function renderMarketExplorer(tips = []) {
+  const insightsView = window.BotViews?.insights;
   const tipEventGroups = uniqueEventTips(tips).filter((group) => group.items.length);
   const oddsEvents = (currentOddsBook || []).filter((event) => Array.isArray(event.bookmakers) && event.bookmakers.length);
   const oddsEventGroups = oddsEvents.map((event) => ({
@@ -2529,8 +2574,9 @@ function renderMarketExplorer(tips = []) {
   if (!eventGroups.length) {
     els.marketEventTabs.innerHTML = "";
     els.marketFamilyTabs.innerHTML = "";
-    els.marketExplorerMeta.innerHTML = `<div class="empty">Todavia no hay partidos con mercados para explorar.</div>`;
-    els.marketExplorer.innerHTML = "";
+    const emptyState = insightsView?.buildMarketExplorerEmptyState?.("none") || {};
+    els.marketExplorerMeta.innerHTML = emptyState.meta || `<div class="empty">Todavia no hay partidos con mercados para explorar.</div>`;
+    els.marketExplorer.innerHTML = emptyState.body || "";
     return;
   }
 
@@ -2575,105 +2621,38 @@ function renderMarketExplorer(tips = []) {
     </button>
   `).join("");
 
-  els.marketExplorerMeta.innerHTML = `
-    <article class="alert-card">
-      <div class="alert-top">
-        <strong>${displayAway} @ ${displayHome}</strong>
-        <span>${displayLeague}</span>
-      </div>
-      <div class="alert-meta">
-        <div>${displayDate}${leadTip ? ` · ${pickRealityMeta(leadTip).label} · ${competitionClassMeta(leadTip).label}` : " · Feed real del mercado"}</div>
-        <div>${activeFamily.items.length} opcion(es) en ${activeFamily.label} para este partido.</div>
-      </div>
-    </article>
-  `;
-  els.marketExplorerMeta.innerHTML = els.marketExplorerMeta.innerHTML.replaceAll(" · ", " | ");
+  els.marketExplorerMeta.innerHTML = insightsView?.buildMarketExplorerMetaMarkup
+    ? insightsView.buildMarketExplorerMetaMarkup({
+      displayAway,
+      displayHome,
+      displayLeague,
+      displayDate,
+      leadTip,
+      activeFamily,
+      deps: { pickRealityMeta, competitionClassMeta },
+    })
+    : "";
 
   if (!activeFamily.items.length) {
-    els.marketExplorer.innerHTML = `<div class="empty">Todavia no hay picks del tipo ${activeFamily.label} para este partido.</div>`;
+    const emptyState = insightsView?.buildMarketExplorerEmptyState?.("family") || {};
+    els.marketExplorer.innerHTML = emptyState.body || `<div class="empty">Todavia no hay picks del tipo ${activeFamily.label} para este partido.</div>`;
     return;
   }
 
-  els.marketExplorer.innerHTML = activeFamily.items
-    .sort((a, b) => {
-      if (a.kind === "prop" || b.kind === "prop") {
-        return Number(b.bestPrice || 0) - Number(a.bestPrice || 0);
-      }
-      return trustScoreForTip(b) - trustScoreForTip(a) || b.ev - a.ev;
+  els.marketExplorer.innerHTML = insightsView?.buildMarketExplorerCardsMarkup
+    ? insightsView.buildMarketExplorerCardsMarkup({
+      activeFamily,
+      deps: {
+        trustScoreForTip,
+        recommendationGradeMeta,
+        trustTierForTip,
+        trustLabelForTip,
+        toPercent,
+        money,
+        recommendedStakeForTip,
+      },
     })
-    .map((tip) => {
-      if (tip.kind === "prop") {
-        return `
-          <article class="alert-card market-card">
-            <div class="alert-top">
-              <strong>${tip.player}: ${tip.selection}${tip.line != null ? ` ${tip.line}` : ""}</strong>
-              <div class="pill-row">
-                <span class="grade-pill ${tip.grade.key}">${tip.grade.grade}</span>
-                <span class="trust-pill ${tip.trustTier}">${tip.trustLabel} · ${tip.trustScore}</span>
-              </div>
-            </div>
-            <div class="alert-meta">
-              <div>${tip.market} · Mejor ${tip.bestBook} ${Number(tip.bestPrice || 0).toFixed(2)}x</div>
-              <div>Segundo mejor ${tip.secondBook || "Sin segundo"} ${tip.secondPrice ? `${Number(tip.secondPrice).toFixed(2)}x` : ""}</div>
-              <div>${tip.grade.label} | Riesgo ${tip.riskLabel} | Stake ${money(tip.recommendedStake || 0)}</div>
-              <div>Comp. ${Number(tip.comparisonPrice || 0).toFixed(2)}x | ${tip.valueLabel} | ${tip.statsSourceLabel}</div>
-              ${tip.playerStats ? `<div>Reciente ${tip.recentStat} | Temporada ${tip.seasonStat} | Proyeccion ${tip.projectedStat}${tip.playerStats.injured ? ` | Lesion ${tip.playerStats.injuryLabel || "activa"}` : ""}</div>` : ""}
-            </div>
-            <div class="market-compare-grid">
-              <div class="market-compare-stat best">
-                <span>Mejor precio</span>
-                <strong>${tip.bestBook || "Sin dato"} ${Number(tip.bestPrice || 0).toFixed(2)}x</strong>
-              </div>
-              <div class="market-compare-stat second">
-                <span>Segundo mejor</span>
-                <strong>${tip.secondBook || "Sin segundo"}${tip.secondPrice ? ` ${Number(tip.secondPrice).toFixed(2)}x` : ""}</strong>
-              </div>
-            </div>
-            <div class="book-row"><span class="pill">Comp. ${Number(tip.comparisonPrice || 0).toFixed(2)}x</span><span class="pill value-band"><span class="value-dot ${tip.valueTier}"></span>${tip.valueLabel}</span>${tip.books.slice(0, 6).map((book) => `<span class="pill">${book.bookmaker} ${book.point ?? ""} ${Number(book.price || 0).toFixed(2)}x</span>`).join("")}</div>
-          </article>
-        `;
-      }
-
-      const grade = recommendationGradeMeta(tip);
-      const altBooks = Array.isArray(tip.books)
-        ? tip.books
-            .filter((book) => String(book.bookmaker || "") !== String(tip.bookmaker || ""))
-            .sort((a, b) => Number(b.price || 0) - Number(a.price || 0))
-            .slice(0, 5)
-        : [];
-      const secondBook = altBooks[0] || null;
-      return `
-        <article class="alert-card market-card">
-          <div class="alert-top">
-            <strong>${tip.type}: ${tip.pick}</strong>
-            <div class="pill-row">
-              <span class="grade-pill ${grade.key}">${grade.grade}</span>
-              <span class="trust-pill ${trustTierForTip(tip)}">${trustLabelForTip(tip)} · ${trustScoreForTip(tip)}</span>
-            </div>
-          </div>
-          <div class="alert-meta">
-            <div>${tip.market}${tip.line ? ` ${tip.line}` : ""} · Mejor ${tip.bookmaker} ${Number(tip.odds || 0).toFixed(2)}x</div>
-            <div>Segundo mejor ${secondBook?.bookmaker || "Sin segundo"} ${secondBook ? `${Number(secondBook.price || 0).toFixed(2)}x` : ""}</div>
-            <div>${grade.label} · Modelo ${toPercent((tip.modelProbability || 0) * 100)} · EV ${tip.ev > 0 ? "+" : ""}${tip.ev}% · Stake ${money(tip.recommendedStake ?? recommendedStakeForTip(tip))}</div>
-            <div>${tip.reason}</div>
-            <div>Origen: Book principal | Comparado con books alternos del evento.</div>
-          </div>
-          <div class="market-compare-grid">
-            <div class="market-compare-stat best">
-              <span>Mejor precio</span>
-              <strong>${tip.bookmaker || "Sin dato"} ${Number(tip.odds || 0).toFixed(2)}x</strong>
-            </div>
-            <div class="market-compare-stat second">
-              <span>Segundo mejor</span>
-              <strong>${secondBook?.bookmaker || "Sin segundo"}${secondBook ? ` ${Number(secondBook.price || 0).toFixed(2)}x` : ""}</strong>
-            </div>
-          </div>
-          ${altBooks.length ? `<div class="book-row">${altBooks.map((book) => `<span class="pill">Alt ${book.bookmaker} ${book.point ?? ""} ${Number(book.price || 0).toFixed(2)}x</span>`).join("")}</div>` : `<div class="alert-meta">Todavia no hay books alternos suficientes para esta seleccion.</div>`}
-        </article>
-      `;
-    })
-    .join("");
-  els.marketExplorer.innerHTML = els.marketExplorer.innerHTML.replaceAll(" · ", " | ");
+    : "";
 }
 
 function buildUnifiedAlerts(tips = [], alertPackage = { alerts: [] }) {
@@ -2729,24 +2708,11 @@ function buildUnifiedAlerts(tips = [], alertPackage = { alerts: [] }) {
 }
 
 function renderAlertsCenter(tips = [], alertPackage = { alerts: [] }) {
+  const insightsView = window.BotViews?.insights;
   const alerts = buildUnifiedAlerts(tips, alertPackage);
-  if (!alerts.length) {
-    els.alertsCenter.innerHTML = `<div class="empty">Todavia no hay alertas EV+ o movimientos de valor para este slate.</div>`;
-    return;
-  }
-
-  els.alertsCenter.innerHTML = alerts.map((alert) => `
-    <article class="alert-card validation-${alert.accent}">
-      <div class="alert-top">
-        <strong>${alert.type}</strong>
-        <span>${alert.title}</span>
-      </div>
-      <div class="alert-meta">
-        <div>${alert.meta}</div>
-        <div>${alert.detail}</div>
-      </div>
-    </article>
-  `).join("");
+  els.alertsCenter.innerHTML = insightsView?.buildAlertsCenterMarkup
+    ? insightsView.buildAlertsCenterMarkup(alerts)
+    : "";
 }
 
 function stakeProfileLabel() {
@@ -3265,6 +3231,18 @@ function logLayerSummary(health = {}) {
   log(`Capas: ${buildLayerSummaryText(health)}.`);
 }
 
+function updateLatestRunHealth(health = {}) {
+  latestBackendStatus = {
+    ...(latestBackendStatus || {}),
+    sourceWinnerFixtures: health.source?.winner || "",
+    sourceWinnerOdds: health.odds?.winner || "",
+    sourceWinnerExternal: health.external?.winner || "",
+    sourceModeFixtures: health.source?.mode || "",
+    sourceModeOdds: health.odds?.mode || "",
+    sourceModeExternal: health.external?.mode || "",
+  };
+}
+
 async function maybeAutoSendTelegramTop(tips) {
   const token = window.BOT_CONFIG?.telegramBotToken;
   const chatId = window.BOT_CONFIG?.telegramChatId;
@@ -3440,7 +3418,7 @@ function bestTipForSlateGame(tips, game) {
 
 function rankedTipsForSlateGame(tips, game) {
   const seenTypes = new Set();
-  return tipsForSlateGame(tips, game)
+  const ranked = tipsForSlateGame(tips, game)
     .sort((a, b) => {
       const gradeDelta = recommendationGradeScore(b) - recommendationGradeScore(a);
       if (gradeDelta) return gradeDelta;
@@ -3454,6 +3432,9 @@ function rankedTipsForSlateGame(tips, game) {
       seenTypes.add(key);
       return true;
     });
+  return window.BotTipEngine?.dedupeTipsByStory
+    ? window.BotTipEngine.dedupeTipsByStory(ranked, { maxPerStory: game?.sport === "soccer" ? 1 : 2 })
+    : ranked;
 }
 
 function groupedMarketsForSlateGame(tips, game) {
@@ -3493,20 +3474,11 @@ function soccerViewMode() {
 }
 
 function soccerMarketRoleMeta(tip, rankedTips = [], index = 0) {
-  if (!tip) return { key: "value", label: "Valor" };
-  if (index === 0) return { key: "principal", label: "Principal" };
-  const type = String(tip.type || "").toLowerCase();
-  const topConfidence = Number(rankedTips[0]?.confidence || 0);
-  const coverageLike = [
-    "doble oportunidad",
-    "empate no apuesta",
-    "handicap asiatico",
-    "spread",
-  ];
-  if (coverageLike.some((entry) => type.includes(entry)) || Number(tip.confidence || 0) >= topConfidence - 3) {
-    return { key: "coverage", label: "Cobertura" };
+  if (window.BotTipEngine?.assignSoccerMarketRole) {
+    return window.BotTipEngine.assignSoccerMarketRole(tip, rankedTips, index);
   }
-  return { key: "value", label: "Valor" };
+  if (!tip) return { key: "value", label: "Valor" };
+  return index === 0 ? { key: "principal", label: "Principal" } : { key: "value", label: "Valor" };
 }
 
 function soccerMarketThreshold() {
@@ -3768,53 +3740,40 @@ function shareTipText(tip) {
 }
 
 function renderShareCard(tip) {
+  const socialView = window.BotViews?.social;
   if (!tip) {
-    els.shareImagePreview.innerHTML = `<div class="empty">Selecciona un pick con el boton Imagen.</div>`;
-    els.shareImageMeta.innerHTML = `<div class="empty">Todavia no hay pick listo para redes.</div>`;
+    const emptyState = socialView?.buildEmptyShareState?.() || {};
+    els.shareImagePreview.innerHTML = emptyState.preview || `<div class="empty">Selecciona un pick con el boton Imagen.</div>`;
+    els.shareImageMeta.innerHTML = emptyState.meta || `<div class="empty">Todavia no hay pick listo para redes.</div>`;
     return;
   }
 
   const verdict = shareVerdictMeta(tip);
   const reality = pickRealityMeta(tip);
   const competition = competitionClassMeta(tip);
-  els.shareImagePreview.innerHTML = `
-    <article class="share-card">
-      <div class="share-card-head">
-        <span class="share-brand">Betting Bot Codex</span>
-        <span class="share-verdict ${verdict.key}">${verdict.label}</span>
-      </div>
-      <div>
-        <p class="match share-match">${tip.game.away} @ ${tip.game.home}</p>
-        <p class="share-pick"><strong>${tip.type}:</strong> ${tip.pick}</p>
-      </div>
-      <div class="share-grid">
-        <div class="share-stat"><strong>Liga</strong><span>${tip.leagueName || sportProfiles[tip.game.sport].apiName}</span></div>
-        <div class="share-stat"><strong>Cuota</strong><span>${tip.bookmaker} ${Number(tip.odds).toFixed(2)}x</span></div>
-        <div class="share-stat"><strong>Modelo</strong><span>${toPercent((tip.modelProbability || 0) * 100)}</span></div>
-        <div class="share-stat"><strong>EV</strong><span>${tip.ev > 0 ? "+" : ""}${tip.ev}%</span></div>
-        <div class="share-stat"><strong>Stake</strong><span>${money(tip.recommendedStake ?? recommendedStakeForTip(tip))}</span></div>
-        <div class="share-stat"><strong>Dato</strong><span>${reality.label}</span></div>
-        <div class="share-stat"><strong>Competencia</strong><span>${competition.label}</span></div>
-      </div>
-      <div class="share-card-footer">
-        <span class="pill pick-reality ${reality.key}">${reality.detail}</span>
-        <span class="pill competition-tag ${competition.key}">${competition.label}</span>
-        <span class="pill">${tip.game.date}</span>
-      </div>
-    </article>
-  `;
+  const leagueLabel = tip.leagueName || sportProfiles[tip.game.sport].apiName;
+  const bookmakerLabel = `${tip.bookmaker} ${Number(tip.odds).toFixed(2)}x`;
+  const modelLabel = toPercent((tip.modelProbability || 0) * 100);
+  const evLabel = `${tip.ev > 0 ? "+" : ""}${tip.ev}%`;
+  const stakeLabel = money(tip.recommendedStake ?? recommendedStakeForTip(tip));
+  els.shareImagePreview.innerHTML = socialView?.buildSharePreviewMarkup
+    ? socialView.buildSharePreviewMarkup({
+      brandLabel: "Mr. Bushido",
+      verdict,
+      tip,
+      leagueLabel,
+      bookmakerLabel,
+      modelLabel,
+      evLabel,
+      stakeLabel,
+      reality,
+      competition,
+    })
+    : "";
 
-  els.shareImageMeta.innerHTML = `
-    <article class="alert-card">
-      <div class="alert-top">
-        <strong>Texto listo</strong>
-        <span>${verdict.label}</span>
-      </div>
-      <div class="alert-meta">
-        <div>${shareTipText(tip).replace(/\n/g, "<br />")}</div>
-      </div>
-    </article>
-  `;
+  els.shareImageMeta.innerHTML = socialView?.buildShareMetaMarkup
+    ? socialView.buildShareMetaMarkup({ verdict, shareText: shareTipText(tip) })
+    : "";
 }
 
 function syncShareCardFromTips(tips) {
@@ -3845,82 +3804,29 @@ function wrapCanvasText(ctx, text, x, y, maxWidth, lineHeight) {
 }
 
 function downloadShareImage(tip) {
+  const socialView = window.BotViews?.social;
   if (!tip) return;
   const verdict = shareVerdictMeta(tip);
   const reality = pickRealityMeta(tip);
   const canvas = document.createElement("canvas");
-  canvas.width = 1080;
-  canvas.height = 1350;
-  const ctx = canvas.getContext("2d");
-  if (!ctx) return;
-
-  ctx.fillStyle = "#111412";
-  ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-  const gradient = ctx.createLinearGradient(0, 0, canvas.width, canvas.height);
-  gradient.addColorStop(0, "#1b211e");
-  gradient.addColorStop(1, "#101512");
-  ctx.fillStyle = gradient;
-  ctx.fillRect(60, 60, 960, 1230);
-
-  ctx.strokeStyle = "rgba(244,247,241,0.12)";
-  ctx.lineWidth = 3;
-  ctx.strokeRect(60, 60, 960, 1230);
-
-  ctx.fillStyle = "#b9c4b8";
-  ctx.font = "700 28px Segoe UI";
-  ctx.fillText("BETTING BOT CODEX", 110, 130);
-
-  const verdictColor = verdict.key === "good" ? "#52d273" : verdict.key === "medium" ? "#f2c14e" : "#ff6b5f";
-  ctx.fillStyle = verdictColor;
-  ctx.beginPath();
-  ctx.roundRect(780, 95, 150, 48, 24);
-  ctx.fill();
-  ctx.fillStyle = "#0b110d";
-  ctx.font = "900 24px Segoe UI";
-  ctx.fillText(verdict.label.toUpperCase(), 810, 128);
-
-  ctx.fillStyle = "#f4f7f1";
-  ctx.font = "900 58px Segoe UI";
-  wrapCanvasText(ctx, `${tip.game.away} @ ${tip.game.home}`, 110, 250, 820, 70);
-
-  ctx.font = "700 38px Segoe UI";
-  ctx.fillStyle = "#f4f7f1";
-  wrapCanvasText(ctx, `${tip.type}: ${tip.pick}`, 110, 420, 820, 52);
-
-  const stats = [
-    ["Liga", tip.leagueName || sportProfiles[tip.game.sport].apiName],
-    ["Cuota", `${tip.bookmaker} ${Number(tip.odds).toFixed(2)}x`],
-    ["Modelo", toPercent((tip.modelProbability || 0) * 100)],
-    ["EV", `${tip.ev > 0 ? "+" : ""}${tip.ev}%`],
-    ["Stake", money(tip.recommendedStake ?? recommendedStakeForTip(tip))],
-    ["Dato", reality.label],
-  ];
-
-  let boxY = 560;
-  stats.forEach((item, index) => {
-    const col = index % 2;
-    const row = Math.floor(index / 2);
-    const x = 110 + col * 420;
-    const y = boxY + row * 150;
-    ctx.fillStyle = "rgba(16,21,18,0.92)";
-    ctx.fillRect(x, y, 360, 110);
-    ctx.strokeStyle = "rgba(244,247,241,0.10)";
-    ctx.strokeRect(x, y, 360, 110);
-    ctx.fillStyle = "#b9c4b8";
-    ctx.font = "700 24px Segoe UI";
-    ctx.fillText(item[0], x + 22, y + 34);
-    ctx.fillStyle = "#f4f7f1";
-    ctx.font = "900 30px Segoe UI";
-    wrapCanvasText(ctx, item[1], x + 22, y + 76, 315, 34);
-  });
-
-  ctx.fillStyle = "#b8d8ff";
-  ctx.font = "800 28px Segoe UI";
-  ctx.fillText(reality.detail, 110, 1080);
-  ctx.fillStyle = "#b9c4b8";
-  ctx.font = "700 24px Segoe UI";
-  ctx.fillText(tip.game.date, 110, 1130);
+  const drawn = socialView?.drawShareImage
+    ? socialView.drawShareImage({
+      canvas,
+      tip,
+      verdict,
+      reality,
+      helpers: {
+        brandLabel: "MR. BUSHIDO",
+        leagueLabel: tip.leagueName || sportProfiles[tip.game.sport].apiName,
+        bookmakerLabel: `${tip.bookmaker} ${Number(tip.odds).toFixed(2)}x`,
+        modelLabel: toPercent((tip.modelProbability || 0) * 100),
+        evLabel: `${tip.ev > 0 ? "+" : ""}${tip.ev}%`,
+        stakeLabel: money(tip.recommendedStake ?? recommendedStakeForTip(tip)),
+        wrapCanvasText,
+      },
+    })
+    : false;
+  if (!drawn) return;
 
   const link = document.createElement("a");
   const slug = `${tip.game.away}-${tip.game.home}-${tip.type}`.toLowerCase().replace(/[^a-z0-9]+/g, "-");
@@ -4377,7 +4283,7 @@ function buildParlays(tips) {
 
 function buildSlateParlayCandidatePool(primaryTips = [], candidateTips = []) {
   const seen = new Set();
-  return [...(primaryTips || []), ...(candidateTips || [])]
+  const combined = [...(candidateTips || []), ...(primaryTips || [])]
     .filter(Boolean)
     .filter((tip) => !tip.analysisOnly && Number(tip.odds || 0) >= 1.45)
     .filter((tip) => Number(tip.ev || 0) > 0 && Number(tip.confidence || 0) >= 45)
@@ -4387,6 +4293,47 @@ function buildSlateParlayCandidatePool(primaryTips = [], candidateTips = []) {
       seen.add(key);
       return true;
     });
+  const soccerGames = [...new Map(
+    combined
+      .filter((tip) => tip?.game?.sport === "soccer")
+      .map((tip) => [slateGameKey(tip.game), tip.game])
+  ).values()];
+  const soccerPool = soccerGames.flatMap((game) => {
+    const ranked = rankedTipsForSlateGame(combined, game)
+      .map((tip, index) => ({
+        tip: { ...tip, selectionRole: soccerMarketRoleMeta(tip, rankedTipsForSlateGame(combined, game), index).label },
+        role: soccerMarketRoleMeta(tip, rankedTipsForSlateGame(combined, game), index),
+      }))
+      .filter((entry) => Number(entry.tip.confidence || 0) >= 43)
+      .filter((entry) => Number(entry.tip.ev || 0) >= 0.5)
+      .sort((a, b) => {
+        const roleScore = { value: 3, coverage: 2, principal: 1 };
+        const roleDelta = (roleScore[b.role.key] || 0) - (roleScore[a.role.key] || 0);
+        if (roleDelta) return roleDelta;
+        const marketDelta = slateParlayMarketPriority(b.tip) - slateParlayMarketPriority(a.tip);
+        if (marketDelta) return marketDelta;
+        return (b.tip.ev || 0) - (a.tip.ev || 0);
+      })
+      .slice(0, 2)
+      .map((entry) => ({ ...entry.tip, parlayRoleKey: entry.role.key }));
+    return soccerPoolDeduped(ranked);
+  });
+
+  const nonSoccerPool = combined.filter((tip) => tip?.game?.sport !== "soccer");
+  const pool = [...soccerPool, ...nonSoccerPool];
+  return window.BotTipEngine?.dedupeTipsByStory
+    ? window.BotTipEngine.dedupeTipsByStory(pool, { maxPerStory: 1 })
+    : pool;
+}
+
+function soccerPoolDeduped(tips = []) {
+  const seenFamilies = new Set();
+  return tips.filter((tip) => {
+    const family = marketFamilyMeta(tip).key;
+    if (seenFamilies.has(family)) return false;
+    seenFamilies.add(family);
+    return true;
+  });
 }
 
 function slateParlayMarketPriority(tip) {
@@ -4405,12 +4352,20 @@ function slateParlayLegScore(tip, profile = {}) {
   const gradeScore = recommendationGradeScore(tip) * 18;
   const trust = trustScoreForTip(tip) * 0.55;
   const ev = clamp(Number(tip.ev || 0), -10, 25) * 2.6;
-  const confidence = clamp(Number(tip.confidence || 0) - 50, 0, 25) * 1.6;
+  const confidenceWeight = tip?.game?.sport === "soccer" ? 0.75 : 1.6;
+  const confidence = clamp(Number(tip.confidence || 0) - 50, 0, 25) * confidenceWeight;
   const market = slateParlayMarketPriority(tip) * Number(profile.marketWeight || 1);
+  const roleBoost = tip?.game?.sport === "soccer"
+    ? tip.parlayRoleKey === "value"
+      ? 8
+      : tip.parlayRoleKey === "coverage"
+        ? 5
+        : 1
+    : 0;
   const realityBoost = isRealTip(tip) ? 6 : pickRealityMeta(tip).key === "mixed" ? 2 : -1;
   const oddsPenalty = Number(tip.odds || 0) > Number(profile.maxLegOdds || 99) ? -18 : 0;
   const propPenalty = marketFamilyMeta(tip).key === "props" && profile.avoidProps ? -10 : 0;
-  return gradeScore + trust + ev + confidence + market + realityBoost + oddsPenalty + propPenalty;
+  return gradeScore + trust + ev + confidence + market + roleBoost + realityBoost + oddsPenalty + propPenalty;
 }
 
 function lotteryEligibleTip(tip) {
@@ -4945,6 +4900,7 @@ function rankingCard(title, item, suffix = "") {
 }
 
 function renderAuditRanking(records) {
+  const auditView = window.BotViews?.audit;
   const settled = records.filter((record) => record.result !== "pending");
   if (!settled.length) {
     els.auditRankingPanel.innerHTML = `<div class="empty">Todavia no hay datos suficientes para ranking.</div>`;
@@ -4960,12 +4916,22 @@ function renderAuditRanking(records) {
   const bestMode = [...modeStats].sort((a, b) => b.roi - a.roi || b.winRate - a.winRate || b.total - a.total)[0];
   const worstMode = [...modeStats].sort((a, b) => a.roi - b.roi || a.winRate - b.winRate || b.total - a.total)[0];
 
-  els.auditRankingPanel.innerHTML = [
-    rankingCard("Mejor deporte", bestSport),
-    rankingCard("Mejor mercado", bestMarket),
-    rankingCard("Mejor modo", bestMode),
-    rankingCard("Peor modo", worstMode),
-  ].join("");
+  els.auditRankingPanel.innerHTML = auditView?.buildAuditRankingMarkup
+    ? auditView.buildAuditRankingMarkup({
+      records,
+      bestSport,
+      bestMarket,
+      bestMode,
+      worstMode,
+      rankingCard,
+      emptyMessage: "Todavia no hay datos suficientes para ranking.",
+    })
+    : [
+      rankingCard("Mejor deporte", bestSport),
+      rankingCard("Mejor mercado", bestMarket),
+      rankingCard("Mejor modo", bestMode),
+      rankingCard("Peor modo", worstMode),
+    ].join("");
 }
 
 function groupConfidenceMetrics(records) {
@@ -5110,6 +5076,7 @@ function autoGradePaperTrades(finalGames) {
 }
 
 function renderBacktestSummary(history, paper) {
+  const auditView = window.BotViews?.audit;
   const settledHistory = history.filter((record) => record.result !== "pending");
   const settledPaper = paper.filter((record) => record.result !== "pending");
   const { source } = backtestFilters();
@@ -5129,18 +5096,29 @@ function renderBacktestSummary(history, paper) {
   const modeStats = groupMetrics([...history, ...paper], "betMode").filter((item) => item.label !== "Sin dato");
   const bestMode = modeStats[0]?.label || "Sin dato";
 
-  els.backtestSummary.innerHTML = `
-    <article class="alert-card">
-      <div class="alert-top">
-        <strong>Backtest rapido</strong>
-        <span>${settledHistory.length + settledPaper.length} cierres</span>
-      </div>
-      <div class="alert-meta">
-        <div>Historial ROI ${toPercent(historyRoi)} · Paper ROI ${toPercent(paperRoi)}</div>
-        <div>Mejor modo observado: ${bestMode}</div>
-      </div>
-    </article>
-  `;
+  els.backtestSummary.innerHTML = auditView?.buildBacktestSummaryMarkup
+    ? auditView.buildBacktestSummaryMarkup({
+      settledHistory,
+      settledPaper,
+      sourceLabel,
+      historyRoi,
+      paperRoi,
+      bestMode,
+      toPercent,
+    })
+    : `
+      <article class="alert-card">
+        <div class="alert-top">
+          <strong>Backtest rapido</strong>
+          <span>${settledHistory.length + settledPaper.length} cierres</span>
+        </div>
+        <div class="alert-meta">
+          <div>Fuente auditada: ${sourceLabel}</div>
+          <div>Historial ROI ${toPercent(historyRoi)} · Paper ROI ${toPercent(paperRoi)}</div>
+          <div>Mejor modo observado: ${bestMode}</div>
+        </div>
+      </article>
+    `;
 }
 
 function renderAuditPanel() {
@@ -5317,6 +5295,7 @@ function populateFilterOptions(history) {
 }
 
 function recordTip(tip, stake = currentStakeValue()) {
+  const reality = pickRealityMeta(tip);
   return {
     id: tipId(tip),
     snapshotId: oddsSnapshotId(tip),
@@ -5335,9 +5314,20 @@ function recordTip(tip, stake = currentStakeValue()) {
     impliedProbability: tip.impliedProbability,
     modelProbability: tip.modelProbability,
     ev: tip.ev,
+    edge: tip.edge,
     valueTier: tip.valueTier || valueTier(tip.edge),
     valueLabel: tip.valueLabel || valueLabel(tip.edge),
     riskLabel: tip.riskLabel || "Medio",
+    realityLabel: reality.label,
+    originLabel: tip.originLabel || tip.oddsSource || reality.detail,
+    selectionRole: tip.selectionRole || "",
+    thresholdUsed: Number(els.soccerMarketThreshold?.value || els.minConfidence.value || 0),
+    sourceWinnerFixtures: latestBackendStatus?.sourceWinnerFixtures || "",
+    sourceWinnerOdds: latestBackendStatus?.sourceWinnerOdds || "",
+    sourceWinnerExternal: latestBackendStatus?.sourceWinnerExternal || "",
+    sourceModeFixtures: latestBackendStatus?.sourceModeFixtures || "",
+    sourceModeOdds: latestBackendStatus?.sourceModeOdds || "",
+    sourceModeExternal: latestBackendStatus?.sourceModeExternal || "",
     result: "pending",
     game: {
       home: tip.game.home,
@@ -5418,6 +5408,7 @@ function upsertHistory(record, result = "pending") {
 }
 
 function renderHistory() {
+  const auditView = window.BotViews?.audit;
   const history = loadHistory();
   populateFilterOptions(history);
   const filteredHistory = applyHistoryFilters(history);
@@ -5466,24 +5457,31 @@ function renderHistory() {
     return;
   }
 
-  els.historyTable.innerHTML = filteredHistory.map((record) => {
-    const profit = profitFor(record);
-    const resultLabel = record.result === "win" ? "Ganado" : record.result === "loss" ? "Perdido" : "Pendiente";
-    const profitClass = profit > 0 ? "profit-win" : profit < 0 ? "profit-loss" : "";
+  els.historyTable.innerHTML = auditView?.buildHistoryRows
+    ? auditView.buildHistoryRows({
+      records: filteredHistory,
+      profitFor,
+      money,
+      confidenceMeta: (record) => `${record.confidence}% conf.`,
+    })
+    : filteredHistory.map((record) => {
+      const profit = profitFor(record);
+      const resultLabel = record.result === "win" ? "Ganado" : record.result === "loss" ? "Perdido" : "Pendiente";
+      const profitClass = profit > 0 ? "profit-win" : profit < 0 ? "profit-loss" : "";
 
-    return `
-      <tr>
-        <td>${record.eventDate}</td>
-        <td>${record.kind}<br><span class="leg-match">${record.sport}</span></td>
-        <td><strong>${record.market}</strong><br>${record.pick}<br><span class="leg-match">${record.title}</span></td>
-        <td>${Number(record.odds).toFixed(2)}x<br><span class="leg-match">${record.confidence}% conf. · ${record.valueLabel || "-"}</span></td>
-        <td>${money(Number(record.stake) || 1)}</td>
-        <td>${record.clv === undefined || record.clv === null ? "-" : `${record.clv > 0 ? "+" : ""}${record.clv}%`}</td>
-        <td><span class="result-pill ${record.result}">${resultLabel}</span></td>
-        <td class="${profitClass}">${money(profit)}</td>
-      </tr>
-    `;
-  }).join("");
+      return `
+        <tr>
+          <td>${record.eventDate}</td>
+          <td>${record.kind}<br><span class="leg-match">${record.sport}</span></td>
+          <td><strong>${record.market}</strong><br>${record.pick}<br><span class="leg-match">${record.title}</span></td>
+          <td>${Number(record.odds).toFixed(2)}x<br><span class="leg-match">${record.confidence}% conf. · ${record.valueLabel || "-"}</span></td>
+          <td>${money(Number(record.stake) || 1)}</td>
+          <td>${record.clv === undefined || record.clv === null ? "-" : `${record.clv > 0 ? "+" : ""}${record.clv}%`}</td>
+          <td><span class="result-pill ${record.result}">${resultLabel}</span></td>
+          <td class="${profitClass}">${money(profit)}</td>
+        </tr>
+      `;
+    }).join("");
 }
 
 function metricsForWindow(history, days) {
@@ -5872,6 +5870,7 @@ function sportAdjustmentPackage(game, context = {}) {
 
 function createTips(game, settings, context = {}) {
   const profile = sportProfiles[game.sport];
+  const sportEngine = window.BotSportEngines?.[game.sport];
   const formBook = context.formBook || {};
   const home = blendRating(ratingFor(game.home, game.sport), formBook[game.home]);
   const away = blendRating(ratingFor(game.away, game.sport), formBook[game.away]);
@@ -5916,39 +5915,30 @@ function createTips(game, settings, context = {}) {
     },
   ];
 
+  if (sportEngine?.buildTips) {
+    tips.push(...sportEngine.buildTips({
+      game,
+      settings,
+      context,
+      profile,
+      favorite,
+      dog,
+      edge,
+      homeEdge,
+      awayEdge,
+      home,
+      away,
+      winConfidence,
+      totalConfidence,
+      spreadConfidence,
+      bothScoreConfidence,
+      isOver,
+      totalLean,
+      adjustments,
+    }));
+  }
+
   if (game.sport === "soccer") {
-    tips.push({
-      type: "Ambos anotan",
-      pick: bothScoreConfidence > 56 ? "Ambos equipos anotan" : "No ambos anotan",
-      marketKey: "btts",
-      confidence: bothScoreConfidence,
-      reason: "Se cruza la fuerza ofensiva de ambos clubes contra la solidez defensiva estimada.",
-    });
-    tips.push({
-      type: "Doble oportunidad",
-      pick: `${favorite} o empate`,
-      targetTeam: favorite,
-      marketKey: "double_chance",
-      confidence: clamp(winConfidence + 7, 52, 84),
-      reason: "Ideal para cubrir el empate cuando el favorito tiene ventaja, pero sin querer pagar la volatilidad del 1X2 puro.",
-    });
-    tips.push({
-      type: "Empate no apuesta",
-      pick: `${favorite} empate no apuesta`,
-      targetTeam: favorite,
-      marketKey: "draw_no_bet",
-      confidence: clamp(winConfidence + 4, 50, 82),
-      reason: "Reduce riesgo cuando el modelo favorece un lado, pero la igualdad sigue viva por contexto de tabla o forma.",
-    });
-    tips.push({
-      type: "Handicap asiatico",
-      pick: `${dog} +0.5 handicap asiatico`,
-      targetTeam: dog,
-      marketKey: "asian_handicap",
-      line: "+0.5",
-      confidence: clamp(spreadConfidence + 3, 50, 80),
-      reason: "El asian handicap absorbe mejor partidos cortos o cerrados y baja castigo frente al moneyline.",
-    });
     tips.push({
       type: "Correct score",
       pick: edge >= 9 ? "2-1" : edge >= 5 ? "1-0" : "1-1",
@@ -5956,49 +5946,6 @@ function createTips(game, settings, context = {}) {
       confidence: clamp(44 + edge * 0.5, 40, 58),
       analysisOnly: true,
       reason: "Marcador correcto solo para analisis. No entra a picks automaticos por volatilidad.",
-    });
-  }
-
-  if (game.sport === "mlb") {
-    const teamTotalSide = homeEdge >= awayEdge ? game.home : game.away;
-    tips.push({
-      type: "Team total",
-      pick: `${teamTotalSide} over 4.5 carreras`,
-      targetTeam: teamTotalSide,
-      marketKey: "team_total",
-      confidence: clamp(totalConfidence - 1 + Math.abs(homeEdge - awayEdge) * 0.35, 50, 78),
-      reason: "Combina entorno de carreras, forma ofensiva reciente y ventaja del lineup esperado para aislar daño del rival.",
-    });
-    if (game.homePitcher || game.awayPitcher) {
-      tips.push({
-        type: "First 5 innings",
-        pick: `${favorite} gana primeras 5 entradas`,
-        targetTeam: favorite,
-        marketKey: "f5_moneyline",
-        confidence: clamp(winConfidence + 2, 52, 80),
-        reason: "Con abridores probables, el F5 pesa mas por matchup de pitcher y evita ruido tardio del bullpen.",
-      });
-      tips.push({
-        type: "First 5 total",
-        pick: `${isOver ? "Over" : "Under"} 4.5 primeras 5 entradas`,
-        totalSide: isOver ? "Over" : "Under",
-        marketKey: "f5_totals",
-        confidence: clamp(totalConfidence + 1, 50, 78),
-        reason: "El total de primeras 5 entradas aprovecha mejor la lectura del abridor y corta parte de la volatilidad del relevo.",
-      });
-    }
-  }
-
-  if (game.sport === "nba" || game.sport === "nfl") {
-    const teamTotalSide = favorite;
-    const baseLine = game.sport === "nba" ? 112.5 : 24.5;
-    tips.push({
-      type: "Team total",
-      pick: `${teamTotalSide} over ${baseLine} ${profile.totalLabel}`,
-      targetTeam: teamTotalSide,
-      marketKey: "team_total",
-      confidence: clamp(totalConfidence - 1 + Math.abs(homeEdge - awayEdge) * 0.28, 50, 77),
-      reason: "Aisla mejor el ataque del lado favorito cuando el modelo ve ventaja de ritmo, eficiencia o matchup.",
     });
   }
 
@@ -7678,7 +7625,7 @@ async function loadSingleLeagueDataPackage({ sport, leagueId, apiChoice, leagueM
   };
 }
 
-async function loadDataPackage() {
+async function loadDataPackageLegacy() {
   const sport = els.sport.value;
   const leagueId = els.league.value;
   const apiChoice = els.api.value;
@@ -7784,6 +7731,27 @@ async function loadDataPackage() {
   return loadSingleLeagueDataPackage({ sport, leagueId, apiChoice, leagueMeta, allowDemo: true });
 }
 
+async function loadDataPackage() {
+  const sport = els.sport.value;
+  const leagueId = els.league.value;
+  const apiChoice = els.api.value;
+  const allSoccer = isAllSoccerSelection();
+
+  if (apiChoice !== "demo" && window.BotDataLayers?.fetchUnifiedDataPackage) {
+    try {
+      const backendPackage = await fetchBackendUnifiedDataPackage({ sport, leagueId, apiChoice, allSoccer });
+      if (window.BotDataLayers.shouldUseBackendPackage(backendPackage)) {
+        log(`Backend orquestado: paquete unificado para ${backendPackage.leagueName || selectedLeagueMeta()?.name || sportProfiles[sport]?.apiName || sport}.`);
+        return backendPackage;
+      }
+    } catch (error) {
+      log(`Backend orquestado no disponible. Fallback al motor local. Detalle: ${error.message}`);
+    }
+  }
+
+  return loadDataPackageLegacy();
+}
+
 function renderTips(tips) {
   els.tips.innerHTML = "";
   const targetDate = currentCalendarDate || isoToday();
@@ -7811,314 +7779,46 @@ function renderTips(tips) {
       els.source.textContent = `Vista plana | ${flatRows.length} mercado(s)`;
       els.picksOverviewState.textContent = "Mercados";
       els.picksOverviewStateDetail.textContent = `Filtro ${roleFilter === "all" ? "todos" : roleFilter} | corte ${threshold}%`;
-      els.tips.innerHTML = `
-        <div class="slate-table-shell">
-          <table class="slate-table">
-            <thead>
-              <tr>
-                <th>Liga</th>
-                <th>Partido</th>
-                <th>Rol</th>
-                <th>Mercado</th>
-                <th>Fecha</th>
-                <th>Cuota</th>
-                <th>EV</th>
-                <th>Conf.</th>
-                <th>Estado</th>
-                <th>Accion</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${flatGroups.map((group) => {
-                const leagueLabel = group.markets[0]?.tip?.leagueName || group.game?.leagueName || "Futbol";
-                const groupKey = slateGameKey(group.game);
-                if (!group.markets.length) {
-                  return `
-                    <tr class="slate-group-row">
-                      <td colspan="10">
-                        <div class="slate-group-label">
-                          <strong>${leagueLabel}</strong>
-                          <span>${group.game.away} @ ${group.game.home}</span>
-                        </div>
-                      </td>
-                    </tr>
-                    <tr class="slate-row no-bet">
-                      <td>${leagueLabel}</td>
-                      <td>
-                        <div class="slate-match-cell">
-                          <strong>${group.game.away} @ ${group.game.home}</strong>
-                          <span>${group.game.status || "Programado"}</span>
-                        </div>
-                      </td>
-                      <td><span class="slate-role-pill value">Sin paso</span></td>
-                      <td><div class="slate-flat-empty">Ningun mercado supero el corte actual.</div></td>
-                      <td>${group.game.date || "--"}</td>
-                      <td>--</td>
-                      <td>--</td>
-                      <td>--</td>
-                      <td><span class="pill grade-pill grade-c">No bet</span></td>
-                      <td><span class="slate-action-text">Esperar</span></td>
-                    </tr>
-                  `;
-                }
-                const rows = group.markets.map((entry, index) => {
-                  const { tip, role, rank } = entry;
-                  const id = tipId(tip);
-                  const suggestedStake = recommendedStakeForTip(tip);
-                  const grade = recommendationGradeMeta(tip);
-                  const action = recommendationActionForTip(tip);
-                  currentTrackingItems[id] = { kind: "tip", payload: tip };
-                  return `
-                    <tr class="slate-row flat-market-row ${action.key}">
-                      <td>${index === 0 ? leagueLabel : ""}</td>
-                      <td>
-                        <div class="slate-match-cell">
-                          <strong>${tip.game.away} @ ${tip.game.home}</strong>
-                          <span>${tip.game.status || "Programado"}</span>
-                        </div>
-                      </td>
-                      <td><span class="slate-role-pill ${role.key}">${role.label}</span></td>
-                      <td>
-                        <div class="slate-market-cell">
-                          <strong>${rank}. ${tip.type}</strong>
-                          <span>${tip.pick}</span>
-                          <em>${tip.reason}</em>
-                        </div>
-                      </td>
-                      <td>${tip.game.date || "--"}</td>
-                      <td>${tip.odds.toFixed(2)}x</td>
-                      <td>${tip.ev > 0 ? "+" : ""}${tip.ev}%</td>
-                      <td>${toPercent(tip.confidence)}</td>
-                      <td>
-                        <span class="pill grade-pill ${grade.key}">${grade.grade}</span>
-                        <span class="pill ${tip.confidence >= 60 ? "pick-clean-badge safe" : tip.confidence >= 55 ? "pick-clean-badge medium" : "pick-clean-badge light"}">${action.label}</span>
-                      </td>
-                      <td>
-                        <div class="slate-row-actions">
-                          <input class="stake-field compact-stake" type="number" min="0.1" step="0.1" value="${suggestedStake}" data-stake-id="${id}" />
-                          <button class="ghost-btn" type="button" data-share-tip="${id}">Imagen</button>
-                          <button class="ghost-btn" type="button" data-ticket-add="${id}">Ticket</button>
-                        </div>
-                      </td>
-                    </tr>
-                  `;
-                }).join("");
-                return `
-                  <tr class="slate-group-row">
-                    <td colspan="10">
-                      <div class="slate-group-label">
-                        <strong>${leagueLabel}</strong>
-                        <span>${group.game.away} @ ${group.game.home}</span>
-                        <span>${group.markets.length} mercado(s) sobre ${threshold}%</span>
-                      </div>
-                    </td>
-                  </tr>
-                  ${rows}
-                `;
-              }).join("")}
-            </tbody>
-          </table>
-        </div>
-      `;
+      if (window.BotViews?.picks?.buildFlatSlateMarkup) {
+        els.tips.innerHTML = window.BotViews.picks.buildFlatSlateMarkup({
+          flatGroups,
+          threshold,
+          registerTip: (id, payload) => { currentTrackingItems[id] = { kind: "tip", payload }; },
+          deps: {
+            tipId,
+            recommendedStakeForTip,
+            recommendationGradeMeta,
+            recommendationActionForTip,
+            toPercent,
+          },
+        });
+      }
       if (slateResolution.expanded) {
         log(`Slate corto en ${targetDate}. Mostrando una vista ampliada con ${visibleGames.length} partido(s) proximos cargados.`);
       }
       return;
     }
 
-    els.tips.innerHTML = `
-      <div class="slate-table-shell">
-        <table class="slate-table">
-          <thead>
-            <tr>
-              <th>Partido</th>
-              <th>Pick principal</th>
-              <th>Mercados jugables</th>
-              <th>Fecha</th>
-              <th>Cuota</th>
-              <th>EV</th>
-              <th>Conf.</th>
-              <th>Estado</th>
-              <th>Accion</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${visibleGames.map((game) => {
-      const tip = bestTipForSlateGame(tips, game);
-      if (!tip) {
-        return `
-          <tr class="slate-row no-bet">
-            <td>
-              <div class="slate-match-cell">
-                <strong>${game.away} @ ${game.home}</strong>
-                <span>${game.status || "Programado"}</span>
-              </div>
-            </td>
-            <td><span class="slate-main-pick">No bet</span><span class="slate-subpick">Sin valor claro en esta corrida.</span></td>
-            <td><span class="slate-subpick">Sin mercados con edge suficiente.</span></td>
-            <td>${game.date || "--"}</td>
-            <td>--</td>
-            <td>--</td>
-            <td>--</td>
-            <td><span class="pill grade-pill grade-c">No bet</span></td>
-            <td><span class="slate-action-text">Esperar</span></td>
-          </tr>
-        `;
-      }
-      const id = tipId(tip);
-      const suggestedStake = recommendedStakeForTip(tip);
-      const grade = recommendationGradeMeta(tip);
-      const action = recommendationActionForTip(tip);
-      const rankedTips = visibleSlateMarketTips(candidatePool, game);
-      const topMarkets = topSlateMarketsForDisplay(candidatePool, game);
-      const marketGroups = groupedMarketsForSlateGame(candidatePool, game);
-      const secondaryTip = rankedTips.find((item) => tipId(item) !== id) || null;
-      currentTrackingItems[id] = { kind: "tip", payload: tip };
-      return `
-        <tr class="slate-row ${action.key}">
-          <td>
-            <div class="slate-match-cell">
-              <strong>${tip.game.away} @ ${tip.game.home}</strong>
-              <span>${tip.leagueName || sportProfiles[tip.game.sport].apiName}</span>
-            </div>
-          </td>
-          <td>
-            <span class="slate-main-pick">${tip.type}: ${tip.pick}</span>
-            <span class="slate-subpick">${secondaryTip ? `Alt: ${secondaryTip.type}: ${secondaryTip.pick}` : grade.label}</span>
-            ${topMarkets.length > 1 ? `
-              <div class="slate-top-market-list">
-                ${topMarkets.map((marketTip, index) => `
-                  <div class="slate-top-market-item ${index === 0 ? "primary" : ""}">
-                    <strong>${index + 1}. ${marketTip.type}</strong>
-                    <span>${marketTip.pick}</span>
-                    <em>${marketTip.odds.toFixed(2)}x · EV ${marketTip.ev > 0 ? "+" : ""}${marketTip.ev}%</em>
-                  </div>
-                `).join("")}
-              </div>
-            ` : ""}
-          </td>
-          <td>
-            <div class="slate-market-stack">
-              ${rankedTips.map((marketTip, index) => `
-                <span class="slate-market-pill ${index === 0 ? "primary" : ""}">
-                  ${marketTip.type}: ${marketTip.pick} · ${marketTip.odds.toFixed(2)}x
-                </span>
-              `).join("")}
-            </div>
-          </td>
-          <td>${tip.game.date || "--"}</td>
-          <td>${tip.odds.toFixed(2)}x</td>
-          <td>${tip.ev > 0 ? "+" : ""}${tip.ev}%</td>
-          <td>${toPercent(tip.confidence)}</td>
-          <td>
-            <span class="pill grade-pill ${grade.key}">${grade.grade}</span>
-            <span class="pill ${tip.confidence >= 60 ? "pick-clean-badge safe" : tip.confidence >= 55 ? "pick-clean-badge medium" : "pick-clean-badge light"}">${action.label}</span>
-          </td>
-          <td>
-            <div class="slate-row-actions">
-              <input class="stake-field compact-stake" type="number" min="0.1" step="0.1" value="${suggestedStake}" data-stake-id="${id}" />
-              <button class="ghost-btn" type="button" data-slate-expand="${slateGameKey(game)}">Ver mercados</button>
-              <button class="ghost-btn" type="button" data-share-tip="${id}">Imagen</button>
-              <button class="ghost-btn" type="button" data-ticket-add="${id}">Ticket</button>
-            </div>
-          </td>
-        </tr>
-        <tr class="slate-detail-row" data-slate-detail="${slateGameKey(game)}" hidden>
-          <td colspan="8">
-            <div class="slate-detail-grid">
-              <div class="mini-board">
-                <div class="section-head">
-                  <div>
-                    <p class="eyebrow">1X2</p>
-                    <h2>Principales</h2>
-                  </div>
-                </div>
-                <div class="alerts-list">
-                  ${marketGroups.main.length ? marketGroups.main.map((marketTip) => `
-                    <article class="alert-card">
-                      <div class="alert-top">
-                        <strong>${marketTip.type}: ${marketTip.pick}</strong>
-                        <span>${marketTip.odds.toFixed(2)}x</span>
-                      </div>
-                      <div class="alert-meta">
-                        <div>EV ${marketTip.ev > 0 ? "+" : ""}${marketTip.ev}% · Conf. ${toPercent(marketTip.confidence)}</div>
-                      </div>
-                    </article>
-                  `).join("") : `<div class="empty">Sin 1X2 fuerte.</div>`}
-                </div>
-              </div>
-              <div class="mini-board">
-                <div class="section-head">
-                  <div>
-                    <p class="eyebrow">Totales</p>
-                    <h2>Over / Under</h2>
-                  </div>
-                </div>
-                <div class="alerts-list">
-                  ${marketGroups.totals.length ? marketGroups.totals.map((marketTip) => `
-                    <article class="alert-card">
-                      <div class="alert-top">
-                        <strong>${marketTip.type}: ${marketTip.pick}</strong>
-                        <span>${marketTip.odds.toFixed(2)}x</span>
-                      </div>
-                      <div class="alert-meta">
-                        <div>EV ${marketTip.ev > 0 ? "+" : ""}${marketTip.ev}% · Conf. ${toPercent(marketTip.confidence)}</div>
-                      </div>
-                    </article>
-                  `).join("") : `<div class="empty">Sin totales fuertes.</div>`}
-                </div>
-              </div>
-              <div class="mini-board">
-                <div class="section-head">
-                  <div>
-                    <p class="eyebrow">Handicap</p>
-                    <h2>Lados y lineas</h2>
-                  </div>
-                </div>
-                <div class="alerts-list">
-                  ${marketGroups.handicap.length ? marketGroups.handicap.map((marketTip) => `
-                    <article class="alert-card">
-                      <div class="alert-top">
-                        <strong>${marketTip.type}: ${marketTip.pick}</strong>
-                        <span>${marketTip.odds.toFixed(2)}x</span>
-                      </div>
-                      <div class="alert-meta">
-                        <div>EV ${marketTip.ev > 0 ? "+" : ""}${marketTip.ev}% · Conf. ${toPercent(marketTip.confidence)}</div>
-                      </div>
-                    </article>
-                  `).join("") : `<div class="empty">Sin handicap fuerte.</div>`}
-                </div>
-              </div>
-              <div class="mini-board">
-                <div class="section-head">
-                  <div>
-                    <p class="eyebrow">Props</p>
-                    <h2>Mercados extra</h2>
-                  </div>
-                </div>
-                <div class="alerts-list">
-                  ${marketGroups.props.length ? marketGroups.props.map((marketTip) => `
-                    <article class="alert-card">
-                      <div class="alert-top">
-                        <strong>${marketTip.type}: ${marketTip.pick}</strong>
-                        <span>${marketTip.odds.toFixed(2)}x</span>
-                      </div>
-                      <div class="alert-meta">
-                        <div>EV ${marketTip.ev > 0 ? "+" : ""}${marketTip.ev}% · Conf. ${toPercent(marketTip.confidence)}</div>
-                      </div>
-                    </article>
-                  `).join("") : `<div class="empty">Sin props fuertes.</div>`}
-                </div>
-              </div>
-            </div>
-          </td>
-        </tr>
-      `;
-            }).join("")}
-          </tbody>
-        </table>
-      </div>
-    `;
+    if (window.BotViews?.picks?.buildSummarySlateMarkup) {
+      els.tips.innerHTML = window.BotViews.picks.buildSummarySlateMarkup({
+        visibleGames,
+        candidatePool,
+        registerTip: (id, payload) => { currentTrackingItems[id] = { kind: "tip", payload }; },
+        deps: {
+          bestTipForSlateGame,
+          visibleSlateMarketTips,
+          topSlateMarketsForDisplay,
+          groupedMarketsForSlateGame,
+          tipId,
+          recommendedStakeForTip,
+          recommendationGradeMeta,
+          recommendationActionForTip,
+          toPercent,
+          slateGameKey,
+          sportProfiles,
+        },
+      });
+    }
     if (slateResolution.expanded) {
       log(`Slate corto en ${targetDate}. Mostrando una vista ampliada con ${visibleGames.length} partido(s) proximos cargados.`);
     }
@@ -8204,97 +7904,25 @@ function renderParlays(parlays) {
     setSectionUsefulness("Parlays recomendados", true);
     const sportLabel = sportProfiles[els.sport.value]?.apiName || "este deporte";
     const slateCount = (currentSlateGames || []).length;
-    els.parlays.innerHTML = `
-      <div class="empty">
-        No se armo un parlay util para ${sportLabel}.
-        ${slateCount < 2
-          ? "Este slate trae muy pocos partidos para combinar con criterio."
-          : "Todavia no hay suficientes piernas limpias y no correlacionadas para mostrarte seguro, sueño o bomba."}
-      </div>
-    `;
+    els.parlays.innerHTML = window.BotViews?.parlays?.buildEmptyParlaysMarkup
+      ? window.BotViews.parlays.buildEmptyParlaysMarkup({ sportLabel, slateCount })
+      : `<div class="empty">No se armo un parlay util para ${sportLabel}.</div>`;
     return;
   }
 
   setSectionUsefulness("Parlays recomendados", true);
-  parlays.forEach((parlay) => {
-    const card = document.createElement("article");
-    const id = parlayId(parlay);
-    const suggestedStake = recommendedStakeForParlay(parlay);
-    currentTrackingItems[id] = { kind: "parlay", payload: parlay };
-    card.className = `parlay-card ${parlay.className}`;
-    const legs = parlay.legs.map((tip) => `
-      <li>
-        <span class="leg-match">${tip.leagueName || sportProfiles[tip.game?.sport || "soccer"]?.apiName || "Liga"} · ${tip.game.away} @ ${tip.game.home}</span>
-        <span class="leg-pick">${tip.type}: ${tip.pick} - ${tip.odds.toFixed(2)}x</span>
-        <span class="leg-book">${tip.bookmaker || "Book"} · ${tip.oddsSource || "Fuente mixta"}</span>
-      </li>
-    `).join("");
-    const criteria = (parlay.criteria || []).map((item) => `<li>${item}</li>`).join("");
-    const parlayBadges = [...(parlay.badges || []), ...(parlay.scopeLabel ? [parlay.scopeLabel] : [])];
-    const badges = parlayBadges.map((badge) => `<span class="pill parlay-badge">${badge}</span>`).join("");
-    const composition = parlay.composition
-      ? `
-        <div class="parlay-composition">
-          <p class="eyebrow">Composicion</p>
-          <div class="pill-row">
-            <span class="pill parlay-badge">${parlay.composition.conservative} conservadores</span>
-            <span class="pill parlay-badge">${parlay.composition.value} value</span>
-            <span class="pill parlay-badge">${parlay.composition.aggressive} agresivos</span>
-          </div>
-        </div>
-      `
-      : "";
-    const sportMix = parlay.sportMix
-      ? `
-        <div class="parlay-composition">
-          <p class="eyebrow">Mix por deporte</p>
-          <div class="pill-row">
-            <span class="pill parlay-badge">${parlay.sportMix.soccer} Futbol</span>
-            <span class="pill parlay-badge">${parlay.sportMix.mlb} MLB</span>
-          </div>
-        </div>
-      `
-      : "";
-
-    card.innerHTML = `
-      <div class="parlay-top">
-        <p class="parlay-title">${parlay.name}</p>
-        <span class="parlay-risk">${parlay.risk}</span>
-      </div>
-      ${badges ? `<div class="pill-row parlay-badge-row">${badges}</div>` : ""}
-      <ul class="parlay-legs">${legs}</ul>
-      <div class="parlay-meta">
-        <div>
-          <span>Cuota est.</span>
-          <strong>${parlay.odds.toFixed(2)}x</strong>
-        </div>
-        <div>
-          <span>Prob. est.</span>
-          <strong>${toPercent(parlay.hitRate)}</strong>
-      </div>
-      </div>
-      <p class="parlay-note">${parlay.note}</p>
-      <p class="parlay-note subtle">${parlay.scopeResolution || "Construido con liga actual"}</p>
-      <p class="parlay-note subtle">Piernas disponibles antes del corte: ${parlay.availableLegs || parlay.legs.length}.</p>
-      ${composition}
-      ${sportMix}
-      ${criteria ? `
-        <div class="parlay-criteria">
-          <p class="eyebrow">Criterio</p>
-          <ul class="parlay-criteria-list">${criteria}</ul>
-        </div>
-      ` : ""}
-      <p class="parlay-note subtle">Base evaluada: ${parlay.sourceCount || parlay.legs.length} mercado(s) candidatos del slate.</p>
-      <div class="track-row">
-        <input class="stake-field" type="number" min="0.1" step="0.1" value="${suggestedStake}" data-stake-id="${id}" />
-        <button class="ghost-btn" type="button" data-ticket-add="${id}">Al ticket</button>
-        <button class="track-btn" type="button" data-history-action="pending" data-history-id="${id}">Guardar</button>
-        <button class="track-btn win" type="button" data-history-action="win" data-history-id="${id}">Ganado</button>
-        <button class="track-btn loss" type="button" data-history-action="loss" data-history-id="${id}">Perdido</button>
-      </div>
-    `;
-    els.parlays.appendChild(card);
-  });
+  if (window.BotViews?.parlays?.buildParlaysMarkup) {
+    els.parlays.innerHTML = window.BotViews.parlays.buildParlaysMarkup({
+      parlays,
+      registerParlay: (id, payload) => { currentTrackingItems[id] = { kind: "parlay", payload }; },
+      deps: {
+        parlayId,
+        recommendedStakeForParlay,
+        toPercent,
+        sportProfiles,
+      },
+    });
+  }
 }
 
 function updateStats(games, tips, evStats = {}) {
@@ -8402,6 +8030,7 @@ async function safelyBuildAndRenderParlays({
 }
 
 async function run() {
+  resetLogFeed();
   setLoading(true);
   els.source.textContent = "Analizando";
   renderOpenBotHelp();
@@ -8431,6 +8060,7 @@ async function run() {
     }
     log(`Fuente ganadora: ${dataSourceLabels[dataPackage.source] || dataPackage.source || "desconocida"} · ${dataPackage.games?.length || 0} partido(s).`);
     logLayerSummary(dataPackage.health || {});
+    updateLatestRunHealth(dataPackage.health || {});
     const normalizedGames = dataPackage.games.length ? dataPackage.games : demoGames[els.sport.value];
     const targetSlateDate = selectTargetSlateDate(normalizedGames);
     currentCalendarDate = targetSlateDate;
@@ -8672,6 +8302,7 @@ async function run() {
           updatedAt: dataPackage.updatedAt || new Date().toLocaleString("es-MX"),
         });
         logLayerSummary(dataPackage.health || {});
+        updateLatestRunHealth(dataPackage.health || {});
         renderEvRejectReasons(rejectReasons, { strongOnly: Boolean(settings.evStrongOnly), valid: passedRawTips.length, rejected: rawTips.length - passedRawTips.length });
         await bootstrapBackendTelemetry();
         renderBackendActivity();
@@ -8780,6 +8411,11 @@ async function run() {
       updatedAt: new Date().toLocaleString("es-MX"),
     });
     logLayerSummary({
+      source: { mode: "fallback", winner: "demo" },
+      odds: { mode: "fallback", winner: "estimated" },
+      external: { mode: "fallback", winner: "base" },
+    });
+    updateLatestRunHealth({
       source: { mode: "fallback", winner: "demo" },
       odds: { mode: "fallback", winner: "estimated" },
       external: { mode: "fallback", winner: "base" },

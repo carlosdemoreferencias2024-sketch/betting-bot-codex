@@ -40,6 +40,22 @@ const sportProfiles = {
   nfl: { apiName: "NFL", baseTotal: 44.5, spreadLabel: "spread +3.5" },
 };
 
+const dataSourceLabels = {
+  oddsapi: "The Odds API",
+  thesportsdb: "TheSportsDB",
+  mlb: "MLB Stats API",
+  backend: "Backend del bot",
+  soccer_total: "Futbol total",
+  estimated: "Estimadas",
+  base: "Base",
+  empty: "Sin fuente",
+  idle: "Sin fuente",
+};
+
+function dataSourceLabel(source) {
+  return dataSourceLabels[source] || source || "Sin fuente";
+}
+
 const backendLeagues = [
   { sport: "soccer", leagueId: "4328", leagueName: "Premier League", oddsKey: "soccer_epl" },
   { sport: "soccer", leagueId: "4480", leagueName: "UEFA Champions League", oddsKey: "soccer_uefa_champs_league" },
@@ -356,6 +372,124 @@ async function fetchScoresForSport(oddsKey) {
   return response.json();
 }
 
+async function fetchSportsDbUpcomingLeague(leagueId) {
+  const config = loadBotConfig();
+  const key = config.sportsDbKey || "123";
+  const response = await fetch(`https://www.thesportsdb.com/api/v1/json/${encodeURIComponent(key)}/eventsnextleague.php?id=${encodeURIComponent(leagueId)}`);
+  if (!response.ok) throw new Error(`TheSportsDB upcoming respondio ${response.status}`);
+  const payload = await response.json();
+  return Array.isArray(payload?.events) ? payload.events : [];
+}
+
+async function fetchSportsDbRecentLeague(leagueId) {
+  const config = loadBotConfig();
+  const key = config.sportsDbKey || "123";
+  const response = await fetch(`https://www.thesportsdb.com/api/v1/json/${encodeURIComponent(key)}/eventspastleague.php?id=${encodeURIComponent(leagueId)}`);
+  if (!response.ok) throw new Error(`TheSportsDB recent respondio ${response.status}`);
+  const payload = await response.json();
+  return Array.isArray(payload?.events) ? payload.events : [];
+}
+
+async function fetchSportsDbTable(leagueId) {
+  const config = loadBotConfig();
+  const key = config.sportsDbKey || "123";
+  const response = await fetch(`https://www.thesportsdb.com/api/v1/json/${encodeURIComponent(key)}/lookuptable.php?l=${encodeURIComponent(leagueId)}`);
+  if (!response.ok) throw new Error(`TheSportsDB table respondio ${response.status}`);
+  const payload = await response.json();
+  return Array.isArray(payload?.table) ? payload.table : [];
+}
+
+async function fetchMlbScheduleRange(startDate, endDate) {
+  const url = `https://statsapi.mlb.com/api/v1/schedule?sportId=1&startDate=${encodeURIComponent(startDate)}&endDate=${encodeURIComponent(endDate)}&hydrate=probablePitcher,team`;
+  const response = await fetch(url);
+  if (!response.ok) throw new Error(`MLB Stats schedule respondio ${response.status}`);
+  const payload = await response.json();
+  const dates = Array.isArray(payload?.dates) ? payload.dates : [];
+  return dates.flatMap((day) => day.games || []);
+}
+
+async function fetchMlbUpcomingGames() {
+  const start = new Date();
+  const end = new Date(start.getTime() + (1000 * 60 * 60 * 24 * 3));
+  return fetchMlbScheduleRange(start.toISOString().slice(0, 10), end.toISOString().slice(0, 10));
+}
+
+async function fetchMlbRecentGames() {
+  const end = new Date();
+  const start = new Date(end.getTime() - (1000 * 60 * 60 * 24 * 7));
+  return fetchMlbScheduleRange(start.toISOString().slice(0, 10), end.toISOString().slice(0, 10));
+}
+
+function normalizeSportsDbEvent(event, sport, leagueMeta, source = "thesportsdb") {
+  return {
+    home: event.strHomeTeam || event.strEvent?.split(" vs ")?.[0] || "Local",
+    away: event.strAwayTeam || event.strEvent?.split(" vs ")?.[1] || "Visitante",
+    date: event.dateEvent || String(event.strTimestamp || "").slice(0, 10) || "Proximo",
+    homeScore: Number.isFinite(Number(event.intHomeScore)) ? Number(event.intHomeScore) : null,
+    awayScore: Number.isFinite(Number(event.intAwayScore)) ? Number(event.intAwayScore) : null,
+    source,
+    sport,
+    leagueId: leagueMeta?.leagueId || "",
+    leagueName: leagueMeta?.leagueName || "",
+    status: Number.isFinite(Number(event.intHomeScore)) && Number.isFinite(Number(event.intAwayScore)) ? "Final" : "Programado",
+  };
+}
+
+function normalizeOddsEventToGame(event, sport, leagueMeta, source = "oddsapi") {
+  return {
+    home: event.home_team,
+    away: event.away_team,
+    date: String(event.commence_time || "").slice(0, 10) || "Proximo",
+    homeScore: Number.isFinite(Number(event.scores?.find?.((item) => item.name === event.home_team)?.score))
+      ? Number(event.scores.find((item) => item.name === event.home_team).score)
+      : null,
+    awayScore: Number.isFinite(Number(event.scores?.find?.((item) => item.name === event.away_team)?.score))
+      ? Number(event.scores.find((item) => item.name === event.away_team).score)
+      : null,
+    source,
+    sport,
+    leagueId: leagueMeta?.leagueId || "",
+    leagueName: leagueMeta?.leagueName || "",
+    status: event.completed ? "Final" : "Programado",
+  };
+}
+
+function normalizeMlbGame(game, leagueMeta, source = "mlb") {
+  const homePitcher = game.teams?.home?.probablePitcher || {};
+  const awayPitcher = game.teams?.away?.probablePitcher || {};
+  return {
+    home: game.teams?.home?.team?.name || "Local MLB",
+    away: game.teams?.away?.team?.name || "Visitante MLB",
+    date: String(game.gameDate || "").slice(0, 10) || "Proximo",
+    homeScore: Number.isFinite(Number(game.teams?.home?.score)) ? Number(game.teams.home.score) : null,
+    awayScore: Number.isFinite(Number(game.teams?.away?.score)) ? Number(game.teams.away.score) : null,
+    homePitcher: homePitcher.fullName || "",
+    awayPitcher: awayPitcher.fullName || "",
+    source,
+    sport: "mlb",
+    leagueId: leagueMeta?.leagueId || "mlb",
+    leagueName: leagueMeta?.leagueName || "Major League Baseball",
+    status: Number.isFinite(Number(game.teams?.home?.score)) && Number.isFinite(Number(game.teams?.away?.score)) ? "Final" : "Programado",
+  };
+}
+
+function standingsMapFromTable(rows = []) {
+  return rows.reduce((acc, row) => {
+    const team = row.strTeam || row.name || row.strTeamBadge;
+    if (!team) return acc;
+    acc[team] = {
+      rank: Number(row.intRank || row.rank || 0),
+      played: Number(row.intPlayed || row.played || 0),
+      wins: Number(row.intWin || row.wins || 0),
+      draws: Number(row.intDraw || row.draws || 0),
+      losses: Number(row.intLoss || row.losses || 0),
+      points: Number(row.intPoints || row.points || 0),
+      source: "thesportsdb",
+    };
+    return acc;
+  }, {});
+}
+
 function getBestH2HOutcome(event) {
   const outcomes = (event.bookmakers || [])
     .flatMap((bookmaker) => (bookmaker.markets || [])
@@ -547,6 +681,318 @@ function buildEmptyBackendPickPackage(meta, detail = "Sin odds reales disponible
       odds: { state: "warn", detail },
       external: { state: "warn", detail: "La capa de enriquecimiento backend sigue en construccion." },
     },
+  };
+}
+
+function sourceMode(source) {
+  if (source === "cache") return "cache";
+  if (!source || source === "estimated" || source === "base" || source === "demo" || source === "empty") return "fallback";
+  return "live";
+}
+
+async function loadBackendFixtures(meta) {
+  const failures = [];
+  if (meta.sport === "soccer") {
+    try {
+      const events = await fetchOddsForSport(meta.oddsKey);
+      if (events.length) {
+        return {
+          games: events.map((event) => normalizeOddsEventToGame(event, meta.sport, meta, "oddsapi")),
+          oddsEvents: events,
+          source: "oddsapi",
+          failures,
+        };
+      }
+      failures.push("The Odds API: sin partidos utiles");
+    } catch (error) {
+      failures.push(`The Odds API: ${error.message}`);
+    }
+    try {
+      const events = await fetchSportsDbUpcomingLeague(meta.leagueId);
+      if (events.length) {
+        return {
+          games: events.map((event) => normalizeSportsDbEvent(event, meta.sport, meta, "thesportsdb")),
+          oddsEvents: [],
+          source: "thesportsdb",
+          failures,
+        };
+      }
+      failures.push("TheSportsDB: sin partidos utiles");
+    } catch (error) {
+      failures.push(`TheSportsDB: ${error.message}`);
+    }
+  }
+
+  if (meta.sport === "mlb") {
+    try {
+      const games = await fetchMlbUpcomingGames();
+      if (games.length) {
+        return {
+          games: games.map((game) => normalizeMlbGame(game, meta, "mlb")),
+          oddsEvents: [],
+          source: "mlb",
+          failures,
+        };
+      }
+      failures.push("MLB Stats API: sin partidos utiles");
+    } catch (error) {
+      failures.push(`MLB Stats API: ${error.message}`);
+    }
+    try {
+      const events = await fetchOddsForSport(meta.oddsKey);
+      if (events.length) {
+        return {
+          games: events.map((event) => normalizeOddsEventToGame(event, meta.sport, meta, "oddsapi")),
+          oddsEvents: events,
+          source: "oddsapi",
+          failures,
+        };
+      }
+      failures.push("The Odds API: sin partidos utiles");
+    } catch (error) {
+      failures.push(`The Odds API: ${error.message}`);
+    }
+  }
+
+  if (meta.sport === "nba" || meta.sport === "nfl") {
+    try {
+      const events = await fetchOddsForSport(meta.oddsKey);
+      if (events.length) {
+        return {
+          games: events.map((event) => normalizeOddsEventToGame(event, meta.sport, meta, "oddsapi")),
+          oddsEvents: events,
+          source: "oddsapi",
+          failures,
+        };
+      }
+      failures.push("The Odds API: sin partidos utiles");
+    } catch (error) {
+      failures.push(`The Odds API: ${error.message}`);
+    }
+  }
+
+  return { games: [], oddsEvents: [], source: "empty", failures };
+}
+
+async function loadBackendRecent(meta) {
+  const failures = [];
+  if (meta.sport === "soccer") {
+    try {
+      const events = await fetchScoresForSport(meta.oddsKey);
+      const recent = events.filter((event) => event.completed).map((event) => normalizeOddsEventToGame(event, meta.sport, meta, "oddsapi"));
+      if (recent.length) {
+        return { recentGames: recent, source: "oddsapi", failures };
+      }
+      failures.push("Scores odds: sin resultados utiles");
+    } catch (error) {
+      failures.push(`Scores odds: ${error.message}`);
+    }
+    try {
+      const events = await fetchSportsDbRecentLeague(meta.leagueId);
+      const recent = events.map((event) => normalizeSportsDbEvent(event, meta.sport, meta, "thesportsdb"))
+        .filter((game) => Number.isFinite(game.homeScore) && Number.isFinite(game.awayScore));
+      if (recent.length) {
+        return { recentGames: recent, source: "thesportsdb", failures };
+      }
+      failures.push("TheSportsDB recent: sin resultados utiles");
+    } catch (error) {
+      failures.push(`TheSportsDB recent: ${error.message}`);
+    }
+  }
+  if (meta.sport === "mlb") {
+    try {
+      const games = await fetchMlbRecentGames();
+      const recent = games.map((game) => normalizeMlbGame(game, meta, "mlb"))
+        .filter((game) => Number.isFinite(game.homeScore) && Number.isFinite(game.awayScore));
+      if (recent.length) {
+        return { recentGames: recent, source: "mlb", failures };
+      }
+      failures.push("MLB Stats recent: sin resultados utiles");
+    } catch (error) {
+      failures.push(`MLB Stats recent: ${error.message}`);
+    }
+  }
+  return { recentGames: [], source: "empty", failures };
+}
+
+async function loadBackendExternal(meta) {
+  const failures = [];
+  if (meta.sport === "soccer") {
+    try {
+      const table = await fetchSportsDbTable(meta.leagueId);
+      const standings = standingsMapFromTable(table);
+      if (Object.keys(standings).length) {
+        return {
+          externalRef: { source: "thesportsdb", standings, injuries: {} },
+          source: "thesportsdb",
+          failures,
+        };
+      }
+      failures.push("TheSportsDB table: sin referencias utiles");
+    } catch (error) {
+      failures.push(`TheSportsDB table: ${error.message}`);
+    }
+  }
+  return {
+    externalRef: { source: "base", standings: {}, injuries: {} },
+    source: "base",
+    failures,
+  };
+}
+
+async function buildBackendUnifiedPackage(meta, options = {}) {
+  const fixturesLayer = await loadBackendFixtures(meta);
+  const recentLayer = await loadBackendRecent(meta);
+  const externalLayer = await loadBackendExternal(meta);
+
+  let oddsEvents = fixturesLayer.oddsEvents || [];
+  let oddsSource = fixturesLayer.source;
+  const oddsFailures = [];
+  if (!oddsEvents.length) {
+    try {
+      oddsEvents = await fetchOddsForSport(meta.oddsKey);
+      oddsSource = oddsEvents.length ? "oddsapi" : "estimated";
+      if (!oddsEvents.length) oddsFailures.push("The Odds API: sin odds utiles");
+    } catch (error) {
+      oddsSource = "estimated";
+      oddsFailures.push(`The Odds API: ${error.message}`);
+    }
+  }
+
+  const backendPackage = oddsEvents.length ? buildBackendPickPackage(meta, oddsEvents.slice(0, 24)) : buildEmptyBackendPickPackage(meta);
+  const sourceWinner = fixturesLayer.source !== "empty" ? fixturesLayer.source : backendPackage.source || "backend";
+
+  return {
+    ok: true,
+    sport: meta.sport,
+    leagueId: meta.leagueId,
+    leagueName: meta.leagueName,
+    source: sourceWinner,
+    games: fixturesLayer.games || [],
+    tips: backendPackage.tips || [],
+    backendTips: [],
+    oddsEvents,
+    recentGames: recentLayer.recentGames || [],
+    validationGames: fixturesLayer.games || [],
+    validationSource: fixturesLayer.source || "backend",
+    externalRef: externalLayer.externalRef || { source: "base", standings: {}, injuries: {} },
+    health: {
+      source: {
+        state: (fixturesLayer.games || []).length ? "ok" : "warn",
+        mode: sourceMode(fixturesLayer.source),
+        winner: fixturesLayer.source || "empty",
+        detail: (fixturesLayer.games || []).length
+          ? `${dataSourceLabel(fixturesLayer.source)} gano fixtures con ${fixturesLayer.games.length} partido(s).`
+          : "Sin fixtures vivos en backend",
+      },
+      recent: {
+        state: (recentLayer.recentGames || []).length ? "ok" : "warn",
+        mode: sourceMode(recentLayer.source),
+        winner: recentLayer.source || "empty",
+        detail: (recentLayer.recentGames || []).length
+          ? `${dataSourceLabel(recentLayer.source)} cargo ${recentLayer.recentGames.length} resultado(s) recientes.`
+          : "Historico backend sin resultados utiles.",
+      },
+      odds: {
+        state: oddsEvents.length ? "ok" : "warn",
+        mode: sourceMode(oddsSource),
+        winner: oddsSource || "estimated",
+        detail: oddsEvents.length
+          ? `${dataSourceLabel(oddsSource)} gano odds con ${oddsEvents.length} evento(s).`
+          : "Sin odds reales disponibles en backend.",
+      },
+      external: {
+        state: Object.keys(externalLayer.externalRef?.standings || {}).length ? "ok" : "warn",
+        mode: sourceMode(externalLayer.source),
+        winner: externalLayer.source || "base",
+        detail: Object.keys(externalLayer.externalRef?.standings || {}).length
+          ? `${dataSourceLabel(externalLayer.source)} activo con ${Object.keys(externalLayer.externalRef.standings).length} referencia(s).`
+          : "Sin referencias externas utiles en backend.",
+      },
+      props: {
+        state: "idle",
+        mode: "idle",
+        winner: "idle",
+        detail: "Props siguen resueltos del lado del frontend.",
+      },
+    },
+    backendDiagnostics: {
+      fixturesFailures: fixturesLayer.failures || [],
+      recentFailures: recentLayer.failures || [],
+      oddsFailures,
+      externalFailures: externalLayer.failures || [],
+    },
+    updatedAt: new Date().toISOString(),
+  };
+}
+
+async function buildBackendAllSoccerPackage(apiChoice) {
+  const soccerLeagues = backendLeagues.filter((item) => item.sport === "soccer");
+  const settled = await Promise.allSettled(soccerLeagues.map((league) => buildBackendUnifiedPackage(league, { apiChoice })));
+  const fulfilled = settled.filter((item) => item.status === "fulfilled").map((item) => item.value);
+  const games = fulfilled.flatMap((item) => item.games || []);
+  const tips = fulfilled.flatMap((item) => item.backendTips || []);
+  const recentGames = fulfilled.flatMap((item) => item.recentGames || []);
+  const oddsEvents = fulfilled.flatMap((item) => item.oddsEvents || []);
+  const standings = Object.assign({}, ...fulfilled.map((item) => item.externalRef?.standings || {}));
+  const liveFixturesCount = fulfilled.filter((item) => item.health?.source?.mode === "live").length;
+  const cacheFixturesCount = fulfilled.filter((item) => item.health?.source?.mode === "cache").length;
+  const liveOddsCount = fulfilled.filter((item) => item.health?.odds?.mode === "live").length;
+  const cacheOddsCount = fulfilled.filter((item) => item.health?.odds?.mode === "cache").length;
+
+  return {
+    ok: true,
+    sport: "soccer",
+    leagueId: "__all_soccer__",
+    leagueName: "Todas las ligas de futbol",
+    source: "soccer_total",
+    games,
+    tips,
+    backendTips: [],
+    oddsEvents,
+    recentGames,
+    validationGames: games,
+    validationSource: "backend",
+    externalRef: { source: "backend", standings, injuries: {} },
+    health: {
+      source: {
+        state: games.length ? "ok" : "warn",
+        mode: liveFixturesCount ? "live" : cacheFixturesCount ? "cache" : "fallback",
+        winner: "soccer_total",
+        detail: `Fixtures: ${games.length} partido(s) desde ${fulfilled.length} liga(s)`,
+      },
+      recent: {
+        state: recentGames.length ? "ok" : "warn",
+        mode: recentGames.length ? "live" : "fallback",
+        winner: "soccer_total",
+        detail: `${recentGames.length} resultado(s) recientes cargados`,
+      },
+      odds: {
+        state: oddsEvents.length ? "ok" : "warn",
+        mode: liveOddsCount ? "live" : cacheOddsCount ? "cache" : "fallback",
+        winner: oddsEvents.length ? "soccer_total" : "estimated",
+        detail: oddsEvents.length ? `Odds: ${oddsEvents.length} evento(s) concentrados` : "Sin odds reales concentradas",
+      },
+      external: {
+        state: Object.keys(standings).length ? "ok" : "warn",
+        mode: Object.keys(standings).length ? "live" : "fallback",
+        winner: Object.keys(standings).length ? "soccer_total" : "base",
+        detail: "External: referencias cruzadas por liga",
+      },
+      props: {
+        state: "idle",
+        mode: "idle",
+        winner: "idle",
+        detail: "No aplica para futbol total",
+      },
+    },
+    backendDiagnostics: {
+      liveFixturesCount,
+      cacheFixturesCount,
+      liveOddsCount,
+      cacheOddsCount,
+    },
+    updatedAt: new Date().toISOString(),
   };
 }
 
@@ -889,21 +1335,39 @@ async function handleApi(req, res, pathname) {
     const url = new URL(req.url || "/", `http://${req.headers.host || "127.0.0.1"}`);
     const sport = url.searchParams.get("sport") || "";
     const leagueId = url.searchParams.get("leagueId") || "";
+    const apiChoice = url.searchParams.get("apiChoice") || "auto";
+    const allSoccer = url.searchParams.get("allSoccer") === "1" || leagueId === "__all_soccer__";
     const key = `${sport}:${leagueId}`;
     let packages = readJson(storageFiles.backendPicks, {});
     let payload = packages[key];
 
-    if (!payload) {
+    if (!payload || apiChoice !== "backend" || allSoccer) {
+      if (sport === "soccer" && allSoccer) {
+        payload = await buildBackendAllSoccerPackage(apiChoice);
+      } else {
       const meta = backendLeagues.find((item) => item.sport === sport && item.leagueId === leagueId);
       if (!meta) {
         sendJson(res, 404, { ok: false, error: "No encontre configuracion backend para ese deporte/liga" });
         return true;
       }
       try {
-        const events = await fetchOddsForSport(meta.oddsKey);
-        payload = buildBackendPickPackage(meta, events.slice(0, 12));
+          payload = await buildBackendUnifiedPackage(meta, { apiChoice });
       } catch (error) {
-        payload = buildEmptyBackendPickPackage(meta, `No pude consultar odds en vivo: ${error.message}`);
+          payload = {
+            ...buildEmptyBackendPickPackage(meta, `No pude consultar datos en vivo: ${error.message}`),
+            ok: true,
+            validationGames: [],
+            validationSource: "backend",
+            health: {
+              source: { state: "warn", mode: "fallback", winner: "empty", detail: `Sin fixtures: ${error.message}` },
+              recent: { state: "warn", mode: "fallback", winner: "empty", detail: "Historico backend no disponible." },
+              odds: { state: "warn", mode: "fallback", winner: "estimated", detail: `Sin odds: ${error.message}` },
+              external: { state: "warn", mode: "fallback", winner: "base", detail: "Sin referencias externas." },
+              props: { state: "idle", mode: "idle", winner: "idle", detail: "Props siguen resueltos del lado del frontend." },
+            },
+            backendDiagnostics: { error: error.message },
+          };
+        }
       }
       packages[key] = payload;
       writeJson(storageFiles.backendPicks, packages);

@@ -1367,6 +1367,31 @@ button:hover {
   padding-bottom: 10px;
 }
 
+.log-entry {
+  border-left: 3px solid transparent;
+  padding-left: 10px;
+}
+
+.log-entry.log-good {
+  color: #dfffe5;
+  border-left-color: rgba(82, 210, 115, 0.78);
+}
+
+.log-entry.log-warn {
+  color: #ffe2a4;
+  border-left-color: rgba(242, 193, 78, 0.78);
+}
+
+.log-entry.log-info {
+  color: var(--muted);
+  border-left-color: rgba(88, 166, 255, 0.48);
+}
+
+.log-entry.log-aggregate {
+  font-size: 0.84rem;
+  color: #b7c6bc;
+}
+
 .note {
   margin-top: 18px;
   border-left: 4px solid var(--gold);
