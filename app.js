@@ -3274,14 +3274,7 @@ function renderCalendar(tips, slateGames = currentSlateGames) {
   const targetDate = currentCalendarDate || isoToday();
   els.calendarDate.value = targetDate;
   renderCalendarDateChips(slateGames);
-  const leagueGamesForDate = (slateGames || []).filter((game) => game?.date === targetDate);
-  const fallbackGames = [...new Map(
-    (tips || [])
-      .filter((tip) => tip?.game?.date === targetDate)
-      .map((tip) => [slateGameKey(tip.game), tip.game])
-  ).values()];
-  const slateResolution = resolveVisibleSlateGames(slateGames, targetDate);
-  const visibleGames = slateResolution.games.length ? slateResolution.games : fallbackGames;
+  const { leagueGamesForDate, slateResolution, visibleGames } = resolveSlateDisplaySet(tips, slateGames, targetDate);
   const bestTips = visibleGames.map((game) => bestTipForSlateGame(tips, game)).filter(Boolean);
   const avgConfidence = bestTips.length ? bestTips.reduce((sum, tip) => sum + tip.confidence, 0) / bestTips.length : 0;
   const noBetCount = Math.max(visibleGames.length - bestTips.length, 0);
@@ -3310,7 +3303,7 @@ function renderCalendar(tips, slateGames = currentSlateGames) {
     <article class="top-pick-card slate-game-card ${action.key}">
       <div class="section-head">
         <span class="value-chip ${bestTip ? (bestTip.valueTier || valueTier(bestTip.edge)) : "low"}">${action.label}</span>
-        <span class="pill">${game.status || "Programado"}</span>
+        <span class="pill">${game.date || "--"} · ${game.status || "Programado"}</span>
       </div>
       <p class="match">${game.away} @ ${game.home}</p>
       ${bestTip ? `
@@ -3456,6 +3449,42 @@ function topSlateMarketsForDisplay(tips, game) {
   const ranked = rankedTipsForSlateGame(tips, game);
   if (!ranked.length) return [];
   const sport = ranked[0]?.game?.sport || game?.sport || "";
+  if (sport === "soccer") {
+    const decorated = ranked.map((tip, index) => ({
+      tip,
+      role: soccerMarketRoleMeta(tip, ranked, index),
+    }));
+    const used = new Set();
+    const tipKey = (tip) => window.BotTipEngine?.tipStoryKey ? window.BotTipEngine.tipStoryKey(tip) : `${tip.type}|${tip.pick}`;
+    const pickRole = (roleKey, sorter) => {
+      const candidate = decorated
+        .filter((entry) => entry.role.key === roleKey)
+        .filter((entry) => !used.has(tipKey(entry.tip)))
+        .sort((a, b) => sorter(a.tip, b.tip))[0];
+      if (!candidate) return null;
+      used.add(tipKey(candidate.tip));
+      return candidate.tip;
+    };
+    const principal = pickRole("principal", (a, b) =>
+      recommendationGradeScore(b) - recommendationGradeScore(a) ||
+      trustScoreForTip(b) - trustScoreForTip(a) ||
+      (b.confidence || 0) - (a.confidence || 0) ||
+      (b.ev || 0) - (a.ev || 0)
+    );
+    const coverage = pickRole("coverage", (a, b) =>
+      trustScoreForTip(b) - trustScoreForTip(a) ||
+      (b.confidence || 0) - (a.confidence || 0) ||
+      (a.odds || 0) - (b.odds || 0) ||
+      (b.ev || 0) - (a.ev || 0)
+    );
+    const value = pickRole("value", (a, b) =>
+      (b.ev || 0) - (a.ev || 0) ||
+      (b.edge || 0) - (a.edge || 0) ||
+      (b.confidence || 0) - (a.confidence || 0)
+    );
+    const forced = [principal, coverage, value].filter(Boolean);
+    if (forced.length >= 2) return forced;
+  }
   const limit = sport === "soccer" ? 3 : 2;
   return ranked.slice(0, limit);
 }
@@ -3464,7 +3493,7 @@ function visibleSlateMarketTips(tips, game) {
   const ranked = rankedTipsForSlateGame(tips, game);
   const sport = ranked[0]?.game?.sport || game?.sport || "";
   if (sport === "soccer" && els.soccerTopThree?.checked) {
-    return ranked.slice(0, 3);
+    return topSlateMarketsForDisplay(tips, game);
   }
   return ranked.slice(0, 5);
 }
@@ -3485,6 +3514,31 @@ function soccerMarketThreshold() {
   return clamp(Number(els.soccerMarketThreshold?.value || 58), 45, 90);
 }
 
+function soccerRoleLaneVerdict(tip, roleMeta, threshold = soccerMarketThreshold()) {
+  const confidence = Number(tip?.consensusConfidence || tip?.confidence || 0);
+  const edge = Number(tip?.edge || 0);
+  const evDecimal = Number(tip?.evDecimal || 0);
+  const modelProbability = Number(tip?.modelProbability || 0);
+  const roleKey = roleMeta?.key || "value";
+
+  if (roleKey === "principal") {
+    return {
+      passed: confidence >= Math.max(58, threshold) && evDecimal >= 0.03 && modelProbability >= 0.54,
+      reason: "principal flojo",
+    };
+  }
+  if (roleKey === "coverage") {
+    return {
+      passed: confidence >= Math.max(54, threshold - 4) && modelProbability >= 0.53,
+      reason: "cobertura floja",
+    };
+  }
+  return {
+    passed: evDecimal >= 0.06 && edge >= 4 && modelProbability >= 0.5,
+    reason: "valor flojo",
+  };
+}
+
 function allValidTipsForSlate(games = [], tips = [], options = {}) {
   const threshold = Number(options.threshold ?? soccerMarketThreshold());
   const roleFilter = String(options.roleFilter || "all");
@@ -3497,7 +3551,12 @@ function allValidTipsForSlate(games = [], tips = [], options = {}) {
         role: soccerMarketRoleMeta(tip, ranked, index),
         rank: index + 1,
       }))
-      .filter((entry) => Number(entry.tip?.confidence || 0) >= threshold)
+      .filter((entry) => {
+        if (entry.tip?.game?.sport !== "soccer") {
+          return Number(entry.tip?.confidence || 0) >= threshold;
+        }
+        return soccerRoleLaneVerdict(entry.tip, entry.role, threshold).passed;
+      })
       .filter((entry) => roleFilter === "all" || entry.role.key === roleFilter);
     rows.push({ game, markets: filtered });
   });
@@ -3517,6 +3576,9 @@ function recommendationActionForTip(tip) {
 
 function resolveVisibleSlateGames(games = [], targetDate = currentCalendarDate || isoToday()) {
   const gamesForDate = (games || []).filter((game) => game?.date === targetDate);
+  if (calendarDatePinned) {
+    return { games: gamesForDate, expanded: false, strict: true };
+  }
   if (gamesForDate.length > 1) {
     return { games: gamesForDate, expanded: false };
   }
@@ -3524,6 +3586,27 @@ function resolveVisibleSlateGames(games = [], targetDate = currentCalendarDate |
     return { games: (games || []).slice(0, 12), expanded: true };
   }
   return { games: gamesForDate, expanded: false };
+}
+
+function resolveSlateDisplaySet(tips = [], slateGames = currentSlateGames, targetDate = currentCalendarDate || isoToday()) {
+  const leagueGamesForDate = (slateGames || []).filter((game) => game?.date === targetDate);
+  const fallbackGames = calendarDatePinned
+    ? []
+    : [...new Map(
+      (tips || [])
+        .filter((tip) => tip?.game?.date === targetDate)
+        .map((tip) => [slateGameKey(tip.game), tip.game])
+    ).values()];
+  const slateResolution = resolveVisibleSlateGames(slateGames, targetDate);
+  const visibleGames = slateResolution.games.length ? slateResolution.games : fallbackGames;
+  return {
+    targetDate,
+    leagueGamesForDate,
+    fallbackGames,
+    slateResolution,
+    visibleGames,
+    strictEmpty: calendarDatePinned && !visibleGames.length,
+  };
 }
 
 function renderCalendarDateChips(games = currentSlateGames) {
@@ -4038,10 +4121,17 @@ function passesValueFilters(tip, seen = new Set(), options = {}) {
   if (seen.has(key)) return reject("odds duplicadas");
   if (!tip.game?.date || tip.game.date === "Proximo") return reject("fecha no confirmada");
   if (Number(tip.odds) < 1.5 || Number(tip.odds) > 4) return reject("cuota fuera de rango");
+  if (tip.oddsAgeState === "old") return reject("odds viejas");
+  if (tip?.game?.sport === "soccer") {
+    const roleMeta = soccerMarketRoleMeta(tip);
+    const roleVerdict = soccerRoleLaneVerdict(tip, roleMeta);
+    if (!roleVerdict.passed) return reject(roleVerdict.reason);
+    seen.add(key);
+    return { passed: true, reason: "", role: roleMeta.key };
+  }
   if ((tip.modelProbability || 0) < 0.52) return reject("probabilidad modelo baja");
   if (((tip.modelProbability || 0) - (tip.impliedProbability || 0)) < 0.03) return reject("edge insuficiente");
   if ((tip.evDecimal || 0) < minEv) return reject("EV bajo");
-  if (tip.oddsAgeState === "old") return reject("odds viejas");
   seen.add(key);
   return { passed: true, reason: "" };
 }
@@ -7887,13 +7977,7 @@ function renderTips(tips) {
   const candidatePool = Array.isArray(window.__lastSlateCandidates) && window.__lastSlateCandidates.length
     ? window.__lastSlateCandidates
     : tips;
-  const fallbackGames = [...new Map(
-    (tips || [])
-      .filter((tip) => tip?.game?.date === targetDate)
-      .map((tip) => [slateGameKey(tip.game), tip.game])
-  ).values()];
-  const slateResolution = resolveVisibleSlateGames(currentSlateGames, targetDate);
-  const visibleGames = slateResolution.games.length ? slateResolution.games : fallbackGames;
+  const { slateResolution, visibleGames, strictEmpty } = resolveSlateDisplaySet(tips, currentSlateGames, targetDate);
 
   if (visibleGames.length) {
     if (isSoccerSlate && soccerViewMode() === "flat") {
@@ -7947,6 +8031,14 @@ function renderTips(tips) {
     if (slateResolution.expanded) {
       log(`Slate corto en ${targetDate}. Mostrando una vista ampliada con ${visibleGames.length} partido(s) proximos cargados.`);
     }
+    return;
+  }
+
+  if (strictEmpty) {
+    els.source.textContent = `Fecha ${targetDate}`;
+    els.picksOverviewState.textContent = "Sin partidos";
+    els.picksOverviewStateDetail.textContent = "La fecha elegida no tiene partidos cargados en este slate.";
+    els.tips.innerHTML = `<div class="empty">No hay partidos cargados para ${targetDate}. Cambia la fecha o genera un slate distinto.</div>`;
     return;
   }
 
@@ -8190,6 +8282,7 @@ async function run() {
     const targetSlateDate = selectTargetSlateDate(normalizedGames);
     currentCalendarDate = targetSlateDate;
     const slateGames = slateGamesForDate(normalizedGames, targetSlateDate);
+    const tipSourceGames = normalizedGames;
     currentSlateGames = normalizedGames;
     currentOddsBook = dataPackage.oddsEvents || [];
     if (!dataPackage.games.length) log("La API no trajo partidos proximos; se cargaron datos demo.");
@@ -8206,13 +8299,13 @@ async function run() {
     const displayTip = (tip) => hydrateTipForDisplay(tip, dataPackage.validationGames, dataPackage);
     const baseRawTips = Array.isArray(dataPackage.backendTips) && dataPackage.backendTips.length
       ? dataPackage.backendTips
-      : slateGames.flatMap((game) => createTips(game, settings, dataPackage));
+      : tipSourceGames.flatMap((game) => createTips(game, settings, dataPackage));
     const baseFallbackTips = Array.isArray(dataPackage.backendTips) && dataPackage.backendTips.length
       ? dataPackage.backendTips
-      : slateGames.flatMap((game) => createTips(game, { ...settings, minConfidence: 48, valueOnly: false }, dataPackage));
+      : tipSourceGames.flatMap((game) => createTips(game, { ...settings, minConfidence: 48, valueOnly: false }, dataPackage));
     const baseMixedFallbackTips = Array.isArray(dataPackage.backendTips) && dataPackage.backendTips.length
       ? dataPackage.backendTips
-      : slateGames.flatMap((game) => createTips(game, { ...settings, minConfidence: 45, valueOnly: false, realOnly: false }, dataPackage));
+      : tipSourceGames.flatMap((game) => createTips(game, { ...settings, minConfidence: 45, valueOnly: false, realOnly: false }, dataPackage));
     const seenRawValueKeys = new Set();
     const seenFallbackValueKeys = new Set();
     const preValidatedTips = baseRawTips
@@ -8333,6 +8426,7 @@ async function run() {
         const targetSlateDate = selectTargetSlateDate(dataPackage.games || []);
         currentCalendarDate = targetSlateDate;
         const slateGames = slateGamesForDate(dataPackage.games || [], targetSlateDate);
+        const tipSourceGames = dataPackage.games || [];
         currentSlateGames = dataPackage.games || [];
         currentOddsBook = dataPackage.oddsEvents || [];
 
@@ -8348,13 +8442,13 @@ async function run() {
         const displayTip = (tip) => hydrateTipForDisplay(tip, dataPackage.validationGames, dataPackage);
         const baseRawTips = Array.isArray(dataPackage.backendTips) && dataPackage.backendTips.length
           ? dataPackage.backendTips
-          : slateGames.flatMap((game) => createTips(game, settings, dataPackage));
+          : tipSourceGames.flatMap((game) => createTips(game, settings, dataPackage));
         const baseFallbackTips = Array.isArray(dataPackage.backendTips) && dataPackage.backendTips.length
           ? dataPackage.backendTips
-          : slateGames.flatMap((game) => createTips(game, { ...settings, minConfidence: 48, valueOnly: false }, dataPackage));
+          : tipSourceGames.flatMap((game) => createTips(game, { ...settings, minConfidence: 48, valueOnly: false }, dataPackage));
         const baseMixedFallbackTips = Array.isArray(dataPackage.backendTips) && dataPackage.backendTips.length
           ? dataPackage.backendTips
-          : slateGames.flatMap((game) => createTips(game, { ...settings, minConfidence: 45, valueOnly: false, realOnly: false }, dataPackage));
+          : tipSourceGames.flatMap((game) => createTips(game, { ...settings, minConfidence: 45, valueOnly: false, realOnly: false }, dataPackage));
         const seenRawValueKeys = new Set();
         const seenFallbackValueKeys = new Set();
         const preValidatedTips = baseRawTips
@@ -8443,6 +8537,7 @@ async function run() {
     const targetSlateDate = selectTargetSlateDate(games);
     currentCalendarDate = targetSlateDate;
     const slateGames = slateGamesForDate(games, targetSlateDate);
+    const tipSourceGames = games;
     currentSlateGames = games;
     const leagueMeta = selectedLeagueMeta();
     currentOddsBook = [];
@@ -8459,18 +8554,18 @@ async function run() {
     const displayTip = (tip) => hydrateTipForDisplay(tip, [], demoContext);
     const seenDemoRawValueKeys = new Set();
     const seenDemoFallbackValueKeys = new Set();
-    const preValidatedTips = slateGames
+    const preValidatedTips = tipSourceGames
       .flatMap((game) => createTips(game, settings, { ...demoContext, scheduleContext: { lastPlayed: {} }, leagueId: leagueMeta?.id || "", leagueName: leagueMeta?.name || "" }))
       .filter((tip) => !settings.realOnly || isRealTip(tip))
       .map(displayTip);
-    const mixedFallbackTips = slateGames
+    const mixedFallbackTips = tipSourceGames
       .flatMap((game) => createTips(game, { ...settings, minConfidence: 45, valueOnly: false, realOnly: false }, { ...demoContext, scheduleContext: { lastPlayed: {} }, leagueId: leagueMeta?.id || "", leagueName: leagueMeta?.name || "" }))
       .map(displayTip);
     const confidencePackage = effectiveMinConfidence(preValidatedTips);
     syncConfidenceControls(confidencePackage);
     const rawTips = preValidatedTips.filter((tip) => tip.confidence >= Number(confidencePackage.threshold || settings.minConfidence));
     window.__lastSlateCandidates = rawTips;
-    const fallbackTips = slateGames
+    const fallbackTips = tipSourceGames
       .flatMap((game) => createTips(game, { ...settings, minConfidence: 48, valueOnly: false }, { ...demoContext, scheduleContext: { lastPlayed: {} }, leagueId: leagueMeta?.id || "", leagueName: leagueMeta?.name || "" }))
       .filter((tip) => !settings.realOnly || isRealTip(tip))
       .map(displayTip)

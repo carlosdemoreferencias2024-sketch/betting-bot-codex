@@ -47,18 +47,47 @@
 
   function assignSoccerMarketRole(tip, rankedTips = [], index = 0) {
     if (!tip) return { key: "value", label: "Valor" };
-    if (index === 0) return { key: "principal", label: "Principal" };
     const type = normalizeText(tip.type);
+    const market = normalizeText(tip.marketKey || tip.market);
+    const odds = Number(tip.odds || 0);
+    const evDecimal = Number(tip.evDecimal || 0);
+    const edge = Number(tip.edge || 0);
     const topConfidence = Number(rankedTips[0]?.confidence || 0);
     const coverageLike = [
       "doble oportunidad",
       "empate no apuesta",
+      "draw no bet",
+      "double chance",
       "handicap asiatico",
+      "asian handicap",
+      "handicap",
       "spread",
     ];
-    if (coverageLike.some((entry) => type.includes(entry)) || Number(tip.confidence || 0) >= topConfidence - 3) {
+    const valueLike = [
+      "ambos anotan",
+      "both teams to score",
+      "btts",
+      "over under",
+      "totals",
+      "correct score",
+    ];
+
+    const winnerLike = market === "1x2" || market === "winner" || type.includes("ganador");
+
+    if (coverageLike.some((entry) => type.includes(entry) || market.includes(entry))) {
       return { key: "coverage", label: "Cobertura" };
     }
+    if (
+      evDecimal >= 0.08 ||
+      edge >= 5 ||
+      valueLike.some((entry) => type.includes(entry) || market.includes(entry))
+    ) {
+      return { key: "value", label: "Valor" };
+    }
+    if (winnerLike || index === 0 || Number(tip.confidence || 0) >= topConfidence - 2) {
+      return { key: "principal", label: "Principal" };
+    }
+    if (odds < 1.5) return { key: "coverage", label: "Cobertura" };
     return { key: "value", label: "Valor" };
   }
 

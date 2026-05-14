@@ -42,7 +42,7 @@
                     <td>
                       <div class="slate-match-cell">
                         <strong>${group.game.away} @ ${group.game.home}</strong>
-                        <span>${group.game.status || "Programado"}</span>
+                        <span>${group.game.date || "--"} · ${group.game.status || "Programado"}</span>
                       </div>
                     </td>
                     <td><span class="slate-role-pill value">Sin paso</span></td>
@@ -69,7 +69,7 @@
                     <td>
                       <div class="slate-match-cell">
                         <strong>${tip.game.away} @ ${tip.game.home}</strong>
-                        <span>${tip.game.status || "Programado"}</span>
+                        <span>${tip.game.date || "--"} · ${tip.game.status || "Programado"}</span>
                       </div>
                     </td>
                     <td><span class="slate-role-pill ${role.key}">${role.label}</span></td>
@@ -143,7 +143,7 @@
                     <td>
                       <div class="slate-match-cell">
                         <strong>${game.away} @ ${game.home}</strong>
-                        <span>${game.status || "Programado"}</span>
+                        <span>${game.date || "--"} · ${game.status || "Programado"}</span>
                       </div>
                     </td>
                     <td><span class="slate-main-pick">No bet</span><span class="slate-subpick">Sin valor claro en esta corrida.</span></td>
@@ -171,7 +171,7 @@
                   <td>
                     <div class="slate-match-cell">
                       <strong>${tip.game.away} @ ${tip.game.home}</strong>
-                      <span>${tip.leagueName || deps.sportProfiles[tip.game.sport].apiName}</span>
+                      <span>${tip.leagueName || deps.sportProfiles[tip.game.sport].apiName} · ${tip.game.date || "--"} · ${tip.game.status || "Programado"}</span>
                     </div>
                   </td>
                   <td>
